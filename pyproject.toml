@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "so101-house-builder"
+version = "0.1.0"
+description = "Small SO-101 and MolmoAct2 three-block house-building harness"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "opencv-python>=4.9",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.10", "pytest>=8.0", "ruff>=0.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/house_builder"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["house_builder"]
+no_site_packages = true
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "cv2", "cv2.*", "yaml", "yaml.*", "torch", "lerobot"]
+follow_imports = "skip"
+ignore_missing_imports = true

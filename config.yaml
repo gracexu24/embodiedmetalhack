@@ -1,0 +1,40 @@
+mock_mode: true
+
+robot:
+  type: so101_follower
+  port: /dev/REPLACE_WITH_SO101_PORT
+  id: replace_with_robot_id
+  home_pose: [0, 0, 0, 0, 0, 0]
+
+policy:
+  checkpoint: lerobot/MolmoAct2-SO100_101-LeRobot
+  local_checkpoint: null
+  device: cuda
+  skill_duration_seconds: 10
+
+cameras:
+  cam0:
+    index: 0
+    width: 640
+    height: 480
+    fps: 30
+  cam1:
+    index: 1
+    width: 640
+    height: 480
+    fps: 30
+
+verification:
+  # EXAMPLE CAM1 PIXEL VALUES: calibrate for the installed side camera.
+  target_x: 320
+  max_center_error_px: 25
+  max_stack_alignment_error_px: 25
+  stability_frames: 10
+  max_stability_movement_px: 5
+  min_color_occupancy: 0.01
+
+  # EXAMPLE SIDE-CAMERA BANDS: calibrate before running real hardware.
+  height_regions:
+    door: {min_y: 300, max_y: 380}
+    wall: {min_y: 220, max_y: 300}
+    roof: {min_y: 140, max_y: 220}
