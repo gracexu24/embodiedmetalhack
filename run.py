@@ -68,6 +68,7 @@ def main() -> int:
             policy,
             verifier,
             float(config["policy"]["skill_duration_seconds"]),
+            float(config["policy"].get("check_interval_seconds", 3.0)),
         )
         result = builder.build(request)
     except KeyboardInterrupt:

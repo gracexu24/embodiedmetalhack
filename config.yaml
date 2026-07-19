@@ -1,14 +1,31 @@
 robot:
-  type: so101_follower
-  port: /dev/REPLACE_WITH_SO101_PORT
-  id: replace_with_robot_id
+  # port: null -> auto-detect the calibrated follower by USB serial id (the same approach
+  # replay_episode.py/deploy_policy.py use all session) -- set explicitly only if multiple
+  # calibrated followers are ever plugged in at once.
+  port: null
+  # Absolute path: run.py's cwd may not be so100-hackathon's repo root.
+  calibration_dir: /Users/jaidev/Desktop/so100-hackathon/calibrations
+  # [0,0,0,0,0,0] calibrated = each arm joint at its calibration "middle" pose, gripper
+  # closed (0% = closed for LINEAR calib_mode) -- this repo's own calibration convention
+  # makes the all-zero pose a real, safe home position already, not a placeholder.
   home_pose: [0, 0, 0, 0, 0, 0]
+  max_step_deg: 10.0
+  # true: torque never enables, no goal is ever written to the bus -- only logged.
+  # This is brand-new, never-run integration code -- flip to false only after watching a
+  # dry run look sane (small, smooth logged deltas, not wild jumps).
+  dry_run: true
 
 policy:
-  checkpoint: lerobot/MolmoAct2-SO100_101-LeRobot
-  local_checkpoint: null
-  device: cuda
+  # The deployed /act endpoint (see so100-hackathon's tools/apps/policy_server_modal_molmoact2.py
+  # or the finetune variant). Swap this to point at a different checkpoint's deployment.
+  server: https://jaidevtrumpet--so100-molmoact2-serve-finetune-molmoact2f-649c1d.modal.run
+  fps: 30.0
+  execute_steps: 24
+  jpeg_quality: 85
   skill_duration_seconds: 10
+  # Re-verify this often instead of only once at the end -- stops as soon as the block is
+  # actually in place rather than always burning the full skill_duration_seconds.
+  check_interval_seconds: 3.0
 
 cameras:
   cam0:

@@ -1,8 +1,10 @@
 # SO-101 Three-Block House Builder
 
 A small Python harness that turns one natural-language request into short MolmoAct2 skills for a
-Seeed Studio SO-101. It parses three colors, plans three layers, runs one combined pick-and-place
-instruction per layer, verifies each placement, and stops at the first failure.
+Seeed Studio SO-101. It parses three colors, plans three layers, and for each layer runs the
+combined pick-and-place instruction in short slices, re-verifying after each one and retrying
+until the placement is confirmed or the time budget runs out. A layer that never verifies stops
+the whole build; a human resets the structure before trying again.
 
 ## House and physical layout
 
@@ -75,8 +77,12 @@ IDLE → CONNECTING → HOMING
                COMPLETED
 ```
 
-Any policy, verification, or runtime failure moves to `FAILED`. Autonomous recovery remains
-intentionally out of scope.
+The `EXECUTING ⇄ VERIFYING` loop runs more than once per layer when needed: each pass runs the
+policy for `check_interval_seconds`, then re-verifies; if it isn't confirmed yet and time remains
+within `skill_duration_seconds`, it loops back to `EXECUTING` instead of giving up after one look.
+Only running out of that time budget (or a policy/runtime exception) moves to `FAILED`.
+Autonomous recovery *after* a `FAILED` build remains intentionally out of scope — a human resets
+the structure and the whole build restarts from the door layer.
 
 ## Repository structure
 
@@ -89,6 +95,7 @@ so101-house-builder/
 ├── human_builder.py
 ├── run.py
 ├── voice_control.py
+├── simulate.py           # full build loop with fake robot/policy/verifier -- no hardware, no Modal
 ├── src/house_builder/
 │   ├── __init__.py
 │   ├── models.py
@@ -118,8 +125,12 @@ without hardware; sections 4–8 are required before moving the real arm.
 - Python 3.11 or newer.
 - A Seeed Studio SO-101 follower arm on a serial port (for real builds).
 - Three cameras: overhead (`cam0`), side (`cam1`), and a model-house camera (`camera3`).
-- A CUDA-capable NVIDIA GPU if you run the real MolmoAct2 policy (`policy.device: cuda`).
-- The LeRobot release used by your SO-101, installed separately (see section 5).
+- A clone of [so100-hackathon](https://github.com/mission-robotics-ai/so100-hackathon) with its
+  pixi environment installed (`pixi install`) -- `src/house_builder/robot.py` drives the arm
+  through that repo's own Feetech driver and calibration files, so it must be importable at run
+  time (see "Running", below). No local GPU or LeRobot install is needed for *this* repo: the
+  MolmoAct2 policy itself runs on a Modal-hosted endpoint (see `policy_server_modal_molmoact2.py`
+  in so100-hackathon), and `policy.py` just calls it over HTTP.
 - On macOS, PortAudio for microphone input:
 
 ```bash
@@ -167,46 +178,49 @@ mypy src/house_builder
 
 ### 4. Configure the robot
 
-Edit the `robot` section of `config.yaml` with your hardware values (the defaults are
-placeholders, not working values):
+`src/house_builder/robot.py`'s `SO101Robot` drives the arm through so100-hackathon's own Feetech
+bus and calibration files (the same code path exercised by that repo's `replay_episode.py` /
+`deploy_policy.py`), not through a separate LeRobot robot class. Edit the `robot` section of
+`config.yaml`:
 
 ```yaml
 robot:
-  type: so101_follower
-  port: /dev/REPLACE_WITH_SO101_PORT   # e.g. /dev/ttyACM0 (Linux) or /dev/tty.usbmodem* (macOS)
-  id: replace_with_robot_id
-  home_pose: [0, 0, 0, 0, 0, 0]        # calibrate to a safe home pose
+  port: null                    # null -> auto-detect the calibrated follower by USB serial id;
+                                 # set explicitly only if multiple calibrated followers are plugged
+                                 # in at once
+  calibration_dir: /absolute/path/to/so100-hackathon/calibrations
+  home_pose: [0, 0, 0, 0, 0, 0] # calibrated middle pose, gripper closed -- already a safe default
+                                 # under this calibration convention, not a placeholder
+  max_step_deg: 10.0             # per-joint, per-tick motion cap -- the safety net against a bad
+                                 # prediction
+  dry_run: true                  # torque never enables, no goal is ever written -- only logged.
+                                 # Flip to false only after watching a dry run look sane.
 ```
 
 Validate joint ordering, units, gripper behavior, stop behavior, and home motion at low speed
-before any policy rollout.
+before any policy rollout -- start with `dry_run: true`.
 
-### 5. Install and adapt LeRobot + MolmoAct2
+### 5. Configure the policy (Modal-hosted MolmoAct2)
 
-Install the LeRobot release your SO-101 setup uses (follow its own instructions), then adapt the
-two integration boundaries. All version-specific imports live in exactly two files:
-
-- `src/house_builder/robot.py` — SO-101 connect, home, stop, observation, action.
-- `src/house_builder/policy.py` — MolmoAct2 load and rollout.
-
-Both mark the spots to edit with:
-
-```python
-# ADAPT TO INSTALLED LEROBOT VERSION
-```
-
-Until adapted, those sections raise clear errors instead of guessing unstable APIs. Configure the
-policy in `config.yaml`:
+`src/house_builder/policy.py`'s `MolmoAct2Policy` doesn't load a model locally -- it calls a
+Modal-hosted `/act` HTTP endpoint (see so100-hackathon's `tools/apps/policy_server_modal_molmoact2.py`,
+or a fine-tuned variant deployed the same way). Deploy that server first (`modal deploy ...` from
+so100-hackathon), then point this repo at it:
 
 ```yaml
 policy:
-  checkpoint: lerobot/MolmoAct2-SO100_101-LeRobot
-  local_checkpoint: null        # set a path to use a local fine-tuned checkpoint
-  device: cuda                  # CUDA is checked at load time
-  skill_duration_seconds: 10
+  server: https://<your-modal-endpoint>          # ends in .modal.run
+  fps: 30.0                    # control rate actions are sent at
+  execute_steps: 24            # actions consumed per chunk before re-observing
+  jpeg_quality: 85
+  skill_duration_seconds: 10   # total time budget per layer
+  check_interval_seconds: 3.0  # how often to re-verify during that budget (see Architecture)
 ```
 
-Each policy call receives one short instruction plus `cam0`, `cam1`, and current joint state.
+Each policy call receives one short instruction plus `cam0`/`cam1` frames (sent as `top`/`side` in
+the `/act` payload) and the current joint state. `policy.load()` is a cheap reachability check
+(GET, not POST), not a real inference call -- it won't trigger a slow cold start, it just fails
+fast on a typo'd URL instead of failing mid-skill.
 
 ### 6. Connect and configure cameras
 
@@ -243,6 +257,21 @@ Install the `voice` extra (section 3) and PortAudio (section 1). Microphone mode
 recognizer from `SpeechRecognition`, so it requires network access. To find a device index or
 debug without a mic, use `--text` (section "Voice-controlled staged build").
 
+### Running: `so100_hackathon` must be importable
+
+`robot.py` imports `so100_hackathon.feetech`/`so100_hackathon.calibration` directly, so any
+command below that touches real hardware (`run.py`, `voice_control.py` -- not `simulate.py`, which
+uses fakes and needs neither) has to run where that package resolves. It's already
+editable-installed inside so100-hackathon's own pixi environment, so the simplest way is to run
+from there with this repo's `src/` also on `PYTHONPATH`:
+
+```bash
+export PYTHONPATH=/absolute/path/to/embodiedmetalhack/src
+cd /absolute/path/to/so100-hackathon
+pixi run python /absolute/path/to/embodiedmetalhack/run.py "Build a house with ..." \
+    --config /absolute/path/to/embodiedmetalhack/config.yaml
+```
+
 ### Quick start
 
 ```bash
@@ -252,13 +281,18 @@ python -m pip install -e ".[dev,voice]"
 # 2. (no hardware) confirm the toolchain
 pytest && ruff check . && mypy src/house_builder
 
-# 3. One-shot build from a typed request
+# 3. (no hardware, no Modal) simulate the full build loop
+python simulate.py
+python simulate.py --retry-layer wall --retry-failures 2   # see a layer retry then succeed
+python simulate.py --fail-layer roof                        # see a layer time out and fail
+
+# 4. One-shot build from a typed request (needs the PYTHONPATH + pixi env above)
 python run.py "Build a house with a red door, yellow walls, and a blue roof."
 
-# 4. One-shot build from a model-house image
+# 5. One-shot build from a model-house image
 python run.py "$(python human_builder.py --image model_house.jpg)"
 
-# 5. Voice-driven staged build
+# 6. Voice-driven staged build
 python voice_control.py            # or: python voice_control.py --text
 ```
 
@@ -340,8 +374,12 @@ stops the robot, and prevents later layers from running.
 
 ```bash
 python run.py \
-  "Build a house with a red door, yellow walls, and a blue roof."
+  "Build a house with a red door, yellow walls, and a blue roof." \
+  --config config.yaml
 ```
+
+(See "Running: `so100_hackathon` must be importable" above for the `PYTHONPATH` + pixi env this
+actually needs.)
 
 The resulting three MolmoAct2 skills are:
 
@@ -376,9 +414,12 @@ cleanup after exceptions.
 
 ## Future autonomous recovery
 
-`recover_failed_placement()` in `builder.py` is the single future extension point. It currently
-returns `False`: a human must reset any failed structure. Add recovery only after removal,
-restacking, and collapse detection are independently validated.
+Retrying *within* a layer is already automatic (`check_interval_seconds`, see Architecture) --
+this section is about recovery *after* a layer has actually failed (timed out without verifying).
+`recover_failed_placement()` in `builder.py` is the single future extension point for that case.
+It currently returns `False`: a human must reset any failed structure, and the next build starts
+over from the door layer -- there's no way to resume mid-build at the failed layer yet. Add
+recovery only after removal, restacking, and collapse detection are independently validated.
 
 ## Fine-tuning data
 

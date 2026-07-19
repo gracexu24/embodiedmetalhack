@@ -130,6 +130,7 @@ def _create_builder(config_path: Path) -> tuple[HouseBuilder, dict[str, Any]]:
         policy,
         verifier,
         float(config["policy"]["skill_duration_seconds"]),
+        float(config["policy"].get("check_interval_seconds", 3.0)),
     )
     return builder, config
 

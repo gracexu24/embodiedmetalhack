@@ -49,6 +49,8 @@ module = [
   "torch",
   "lerobot",
   "speech_recognition",
+  "so100_hackathon",
+  "so100_hackathon.*",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

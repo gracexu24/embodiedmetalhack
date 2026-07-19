@@ -2,7 +2,7 @@
 
 import logging
 
-from .models import Block, BuildResult, BuildStep, HouseRequest, Layer
+from .models import Block, BuildResult, BuildStep, HouseRequest, Layer, VerificationResult
 from .planner import create_build_plan
 from .policy import Policy
 from .robot import Robot
@@ -17,11 +17,18 @@ class HouseBuilder:
         policy: Policy,
         verifier: PlacementVerifier,
         duration_seconds: float = 10.0,
+        check_interval_seconds: float = 3.0,
     ) -> None:
         self.robot = robot
         self.policy = policy
         self.verifier = verifier
         self.duration_seconds = duration_seconds
+        # MolmoAct2 has no built-in stopping signal -- it never reports "task complete",
+        # it just keeps emitting motion for as long as it's asked to run. So instead of
+        # running blind for the full duration_seconds and checking once at the end, run
+        # in check_interval_seconds slices and re-verify after each one, stopping as soon
+        # as the block is actually in place rather than always burning the full budget.
+        self.check_interval_seconds = check_interval_seconds
         self.state_machine = BuildStateMachine()
         self.log = logging.getLogger(__name__)
         self._plan: list[BuildStep] = []
@@ -78,21 +85,7 @@ class HouseBuilder:
             self.state_machine.transition(BuildState.EXECUTING)
             self.log.info("Building %s layer", layer.value)
             self.log.info("MolmoAct2 instruction: %s", step.instruction)
-            if not self.policy.run_instruction(
-                step.instruction,
-                self.duration_seconds,
-            ):
-                result = self._failure(
-                    self._completed,
-                    step.block,
-                    "The policy failed to execute the layer instruction.",
-                )
-                self.close()
-                return result
-
-            self.robot.move_home()
-            self.state_machine.transition(BuildState.VERIFYING)
-            verification = self.verifier.verify(step.block, layer_index)
+            verification = self._run_until_verified(step, layer_index)
             self.log.info("Verification result: %s", verification)
             if not verification.success:
                 result = self._failure(
@@ -127,6 +120,27 @@ class HouseBuilder:
             self.state_machine.fail()
             self.close()
             raise
+
+    def _run_until_verified(self, step: BuildStep, layer_index: int) -> VerificationResult:
+        """Run the policy in check_interval_seconds slices, re-verifying after each one,
+        stopping as soon as verification succeeds instead of always running the full
+        duration_seconds. self.policy.run_instruction's own return value isn't a
+        meaningful success signal for MolmoAct2 (see run_instruction's docstring) -- ground
+        truth here is entirely what the camera verifier reports."""
+        elapsed = 0.0
+        verification = VerificationResult(False, False, False, False, False, "No attempt made.")
+        while elapsed < self.duration_seconds:
+            chunk_duration = min(self.check_interval_seconds, self.duration_seconds - elapsed)
+            self.policy.run_instruction(step.instruction, chunk_duration)
+            elapsed += chunk_duration
+
+            self.robot.move_home()
+            self.state_machine.transition(BuildState.VERIFYING)
+            verification = self.verifier.verify(step.block, layer_index)
+            if verification.success or elapsed >= self.duration_seconds:
+                return verification
+            self.state_machine.transition(BuildState.EXECUTING)
+        return verification
 
     @property
     def completed_layers(self) -> list[Layer]:
