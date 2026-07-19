@@ -20,6 +20,9 @@ dev = ["mypy>=1.10", "pytest>=8.0", "ruff>=0.5"]
 # Only needed for src/house_builder/sync_checkpoint.py (pulling a trained checkpoint
 # down from a Modal Volume). Not needed to run the harness itself.
 checkpoint-sync = ["modal>=1.0"]
+# Only needed for the backend/ FastAPI dashboard server. Not needed to run the
+# harness itself (run.py) or the test suite.
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "websockets>=12.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/house_builder"]
