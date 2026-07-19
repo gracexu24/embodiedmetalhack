@@ -1,4 +1,4 @@
-"""Mock and MolmoAct2 policy implementations."""
+"""MolmoAct2 policy interface and LeRobot integration boundary."""
 
 from collections.abc import Callable
 from typing import Any
@@ -14,34 +14,6 @@ class Policy:
 
     def run_instruction(self, instruction: str, duration_seconds: float) -> bool:
         raise NotImplementedError
-
-
-class MockPolicy(Policy):
-    """Policy that records instructions and returns configured outcomes."""
-
-    def __init__(
-        self,
-        outcomes: list[bool] | None = None,
-        raise_on_call: int | None = None,
-    ) -> None:
-        self.loaded = False
-        self.instructions: list[str] = []
-        self.outcomes = list(outcomes or [])
-        self.raise_on_call = raise_on_call
-
-    def load(self) -> None:
-        self.loaded = True
-
-    def run_instruction(self, instruction: str, duration_seconds: float) -> bool:
-        if not self.loaded:
-            raise RuntimeError("Mock policy has not been loaded.")
-        if duration_seconds <= 0:
-            raise ValueError("Skill duration must be positive.")
-        call_index = len(self.instructions)
-        self.instructions.append(instruction)
-        if self.raise_on_call == call_index:
-            raise RuntimeError("Injected mock policy exception.")
-        return self.outcomes.pop(0) if self.outcomes else True
 
 
 class MolmoAct2Policy(Policy):
@@ -68,7 +40,7 @@ class MolmoAct2Policy(Policy):
             if not torch.cuda.is_available():
                 raise RuntimeError(
                     "MolmoAct2 is configured for CUDA, but CUDA is unavailable. "
-                    "Use --mock or install a CUDA-enabled PyTorch environment."
+                    "Install a CUDA-enabled PyTorch environment."
                 )
 
         try:

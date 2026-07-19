@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a human-built model house from cam1 and emit a harness request."""
+"""Read a human-built model house from camera3 and emit a harness request."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def detect_model_house(
     frame: np.ndarray,
     verification_config: dict[str, Any],
 ) -> HouseRequest:
-    """Detect the allowed color in each calibrated cam1 layer band."""
+    """Detect the allowed color in each calibrated camera3 layer band."""
     detected: dict[Layer, Color] = {}
     for layer in Layer:
         region = verification_config["height_regions"][layer.value]
@@ -33,7 +33,7 @@ def detect_model_house(
         margin = float(verification_config.get("min_color_margin", 0.005))
         if best_score < minimum:
             raise ValueError(
-                f"No allowed {layer.value} color was visible in its cam1 height band."
+                f"No allowed {layer.value} color was visible in its camera3 height band."
             )
         if len(ranked) > 1 and best_score - ranked[1][1] < margin:
             raise ValueError(f"Ambiguous colors in the {layer.value} height band.")
@@ -75,34 +75,46 @@ def _color_occupancy(
     return float(np.count_nonzero(mask)) / float(mask.size)
 
 
-def _load_config(path: Path) -> dict[str, Any]:
+def load_config(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
-    if not isinstance(config, dict) or "verification" not in config or "cameras" not in config:
-        raise ValueError(f"{path} must define verification and cameras sections.")
+    if not isinstance(config, dict) or "human_builder" not in config or "cameras" not in config:
+        raise ValueError(f"{path} must define human_builder and cameras sections.")
     return config
 
 
-def _capture_cam1(camera_config: dict[str, Any], warmup_frames: int) -> np.ndarray:
+def _capture_camera3(camera_config: dict[str, Any], warmup_frames: int) -> np.ndarray:
     camera = cv2.VideoCapture(int(camera_config["index"]))
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera_config["width"]))
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera_config["height"]))
     camera.set(cv2.CAP_PROP_FPS, int(camera_config["fps"]))
     if not camera.isOpened():
         camera.release()
-        raise RuntimeError("Could not open cam1.")
+        raise RuntimeError("Could not open camera3.")
     try:
         frame: np.ndarray | None = None
         for _ in range(max(1, warmup_frames)):
             ok, captured = camera.read()
             if not ok or captured is None:
-                raise RuntimeError("Could not read cam1.")
+                raise RuntimeError("Could not read camera3.")
             frame = captured
         if frame is None:
-            raise RuntimeError("cam1 returned no frame.")
+            raise RuntimeError("camera3 returned no frame.")
         return frame
     finally:
         camera.release()
+
+
+def capture_model_house(
+    config: dict[str, Any],
+    warmup_frames: int = 10,
+) -> HouseRequest:
+    """Capture camera3 and return the detected model-house request."""
+    frame = _capture_camera3(
+        config["cameras"]["camera3"],
+        warmup_frames,
+    )
+    return detect_model_house(frame, config["human_builder"])
 
 
 def main() -> int:
@@ -110,19 +122,21 @@ def main() -> int:
         description="Convert a camera view of a model house into a harness sentence."
     )
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
-    parser.add_argument("--image", type=Path, help="Use an image instead of live cam1")
+    parser.add_argument("--image", type=Path, help="Use an image instead of live camera3")
     parser.add_argument("--warmup-frames", type=int, default=10)
     args = parser.parse_args()
 
     try:
-        config = _load_config(args.config)
+        config = load_config(args.config)
         if args.image:
             frame = cv2.imread(str(args.image))
             if frame is None:
                 raise ValueError(f"Could not read image {args.image}.")
         else:
-            frame = _capture_cam1(config["cameras"]["cam1"], args.warmup_frames)
-        request = detect_model_house(frame, config["verification"])
+            request = capture_model_house(config, args.warmup_frames)
+            frame = None
+        if frame is not None:
+            request = detect_model_house(frame, config["human_builder"])
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Could not read model house: {exc}")
         return 1

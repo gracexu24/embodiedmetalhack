@@ -1,33 +1,33 @@
-"""Turn a house request into three ordered pick-and-place steps."""
+"""Turn a house request into three combined MolmoAct2 skills."""
 
 from .models import Block, BuildStep, HouseRequest, Layer
 
 
 def create_build_plan(request: HouseRequest) -> list[BuildStep]:
-    """Return door, wall, and roof steps in safe stacking order."""
+    """Return one combined pick-and-place instruction per layer."""
     door = Block(Layer.DOOR, request.door)
     wall = Block(Layer.WALL, request.wall)
     roof = Block(Layer.ROOF, request.roof)
     return [
         BuildStep(
             door,
-            f"Pick up the {door.color.value} door block.",
-            f"Place the held {door.color.value} door block in the house foundation position.",
+            (
+                f"Pick up the {door.color.value} block and place it "
+                "on the black rectangle."
+            ),
         ),
         BuildStep(
             wall,
-            f"Pick up the {wall.color.value} wall block.",
             (
-                f"Stack the held {wall.color.value} wall block "
-                "directly on top of the door block."
+                f"Pick up the {wall.color.value} block and stack it "
+                f"on the first {door.color.value} block."
             ),
         ),
         BuildStep(
             roof,
-            f"Pick up the {roof.color.value} roof block.",
             (
-                f"Stack the held {roof.color.value} roof block "
-                "directly on top of the wall block."
+                f"Pick up the {roof.color.value} triangle block and stack it "
+                f"on the second {wall.color.value} block."
             ),
         ),
     ]

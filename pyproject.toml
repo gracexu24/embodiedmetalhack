@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["mypy>=1.10", "pytest>=8.0", "ruff>=0.5"]
+voice = ["PyAudio>=0.2.14", "SpeechRecognition>=3.14"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/house_builder"]
@@ -38,6 +39,16 @@ packages = ["house_builder"]
 no_site_packages = true
 
 [[tool.mypy.overrides]]
-module = ["numpy", "numpy.*", "cv2", "cv2.*", "yaml", "yaml.*", "torch", "lerobot"]
+module = [
+  "numpy",
+  "numpy.*",
+  "cv2",
+  "cv2.*",
+  "yaml",
+  "yaml.*",
+  "torch",
+  "lerobot",
+  "speech_recognition",
+]
 follow_imports = "skip"
 ignore_missing_imports = true

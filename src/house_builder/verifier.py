@@ -24,16 +24,9 @@ class PlacementVerifier:
         self,
         config: dict[str, Any],
         camera_config: dict[str, Any] | None = None,
-        *,
-        mock: bool = False,
-        fail_once: Layer | None = None,
-        fail_always: Layer | None = None,
     ) -> None:
         self.config = config
         self.camera_config = camera_config or {}
-        self.mock = mock
-        self.fail_once = fail_once
-        self.fail_always = fail_always
         self.calls: list[Layer] = []
         self._placed_blocks: list[Block] = []
         self._cameras: dict[str, Any] = {}
@@ -41,8 +34,6 @@ class PlacementVerifier:
     def verify(self, expected_block: Block, layer_index: int) -> VerificationResult:
         """Verify one layer from cam1 using color and calibrated height bands."""
         self.calls.append(expected_block.layer)
-        if self.mock:
-            return self._mock_result(expected_block)
 
         expected_order = [Layer.DOOR, Layer.WALL, Layer.ROOF]
         if (
@@ -111,28 +102,9 @@ class PlacementVerifier:
 
     def camera_observations(self) -> dict[str, np.ndarray]:
         """Return both camera frames for the policy; verification itself uses cam1."""
-        if self.mock:
-            raise RuntimeError("Mock verification does not provide camera frames.")
         self._open_camera("cam0")
         self._open_camera("cam1")
         return {"cam0": self._read("cam0"), "cam1": self._read("cam1")}
-
-    def _mock_result(self, expected_block: Block) -> VerificationResult:
-        should_fail = expected_block.layer is self.fail_always
-        if expected_block.layer is self.fail_once:
-            should_fail = True
-            self.fail_once = None
-        if should_fail:
-            return VerificationResult(
-                False,
-                True,
-                False,
-                True,
-                False,
-                f"Mock verification failure for {expected_block.layer.value}.",
-            )
-        self._placed_blocks.append(expected_block)
-        return VerificationResult(True, True, True, True, True)
 
     def _open_camera(self, name: str) -> None:
         if name in self._cameras:

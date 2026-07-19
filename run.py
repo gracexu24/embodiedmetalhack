@@ -10,8 +10,8 @@ import yaml
 
 from house_builder.builder import HouseBuilder
 from house_builder.parser import parse_house_request
-from house_builder.policy import MockPolicy, MolmoAct2Policy, Policy
-from house_builder.robot import MockRobot, Robot, SO101Robot
+from house_builder.policy import MolmoAct2Policy
+from house_builder.robot import SO101Robot
 from house_builder.verifier import PlacementVerifier
 
 
@@ -29,7 +29,6 @@ def load_config(path: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a three-block SO-101 house.")
     parser.add_argument("request", help="Natural-language description of the desired house")
-    parser.add_argument("--mock", action="store_true", help="Do not use cameras or robot hardware")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -54,22 +53,16 @@ def main() -> int:
 
     try:
         config = load_config(args.config)
-        mock = args.mock or bool(config.get("mock_mode", False))
-        robot: Robot = MockRobot() if mock else SO101Robot(config["robot"])
+        robot = SO101Robot(config["robot"])
         verifier = PlacementVerifier(
             config["verification"],
             config["cameras"],
-            mock=mock,
         )
-        policy: Policy
-        if mock:
-            policy = MockPolicy()
-        else:
-            policy = MolmoAct2Policy(
-                config["policy"],
-                robot,
-                verifier.camera_observations,
-            )
+        policy = MolmoAct2Policy(
+            config["policy"],
+            robot,
+            verifier.camera_observations,
+        )
         builder = HouseBuilder(
             robot,
             policy,

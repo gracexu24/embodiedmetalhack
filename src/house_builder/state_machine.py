@@ -8,8 +8,7 @@ class BuildState(str, Enum):
     IDLE = "idle"
     CONNECTING = "connecting"
     HOMING = "homing"
-    PICKING = "picking"
-    PLACING = "placing"
+    EXECUTING = "executing"
     VERIFYING = "verifying"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -18,11 +17,10 @@ class BuildState(str, Enum):
 _ALLOWED: dict[BuildState, set[BuildState]] = {
     BuildState.IDLE: {BuildState.CONNECTING},
     BuildState.CONNECTING: {BuildState.HOMING, BuildState.FAILED},
-    BuildState.HOMING: {BuildState.PICKING, BuildState.FAILED},
-    BuildState.PICKING: {BuildState.PLACING, BuildState.FAILED},
-    BuildState.PLACING: {BuildState.VERIFYING, BuildState.FAILED},
+    BuildState.HOMING: {BuildState.EXECUTING, BuildState.FAILED},
+    BuildState.EXECUTING: {BuildState.VERIFYING, BuildState.FAILED},
     BuildState.VERIFYING: {
-        BuildState.PICKING,
+        BuildState.EXECUTING,
         BuildState.COMPLETED,
         BuildState.FAILED,
     },

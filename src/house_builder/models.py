@@ -54,8 +54,7 @@ class Block:
 @dataclass(frozen=True)
 class BuildStep:
     block: Block
-    pick_instruction: str
-    place_instruction: str
+    instruction: str
 
 
 @dataclass

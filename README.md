@@ -1,10 +1,8 @@
 # SO-101 Three-Block House Builder
 
 A small Python harness that turns one natural-language request into short MolmoAct2 skills for a
-Seeed Studio SO-101. It parses three colors, plans three layers, runs one pick and one placement
+Seeed Studio SO-101. It parses three colors, plans three layers, runs one combined pick-and-place
 instruction per layer, verifies each placement, and stops at the first failure.
-
-Mock mode works without a robot, cameras, CUDA, LeRobot, or MolmoAct2.
 
 ## House and physical layout
 
@@ -70,9 +68,9 @@ The small state machine validates the linear lifecycle:
 ```text
 IDLE → CONNECTING → HOMING
                     ↓
-          PICKING → PLACING → VERIFYING
-             ↑                    │
-             └────────────────────┘
+             EXECUTING → VERIFYING
+                 ↑           │
+                 └───────────┘
                     ↓
                COMPLETED
 ```
@@ -90,6 +88,7 @@ so101-house-builder/
 ├── config.yaml
 ├── human_builder.py
 ├── run.py
+├── voice_control.py
 ├── src/house_builder/
 │   ├── __init__.py
 │   ├── models.py
@@ -105,66 +104,167 @@ so101-house-builder/
     ├── test_planner.py
     ├── test_builder.py
     ├── test_human_builder.py
-    └── test_verifier.py
+    ├── test_verifier.py
+    └── test_voice_control.py
 ```
 
-## Installation
+## Setup
 
-Python 3.11 or newer is required.
+Complete setup runs top to bottom. Sections 1–3 are enough to run tests and the parser/planner
+without hardware; sections 4–8 are required before moving the real arm.
+
+### 1. Prerequisites
+
+- Python 3.11 or newer.
+- A Seeed Studio SO-101 follower arm on a serial port (for real builds).
+- Three cameras: overhead (`cam0`), side (`cam1`), and a model-house camera (`camera3`).
+- A CUDA-capable NVIDIA GPU if you run the real MolmoAct2 policy (`policy.device: cuda`).
+- The LeRobot release used by your SO-101, installed separately (see section 5).
+- On macOS, PortAudio for microphone input:
+
+```bash
+brew install portaudio
+```
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt-get install portaudio19-dev
+```
+
+### 2. Clone and create a virtual environment
 
 ```bash
 cd so101-house-builder
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
 ```
 
-`opencv-python` provides the HSV color segmentation used by verification.
-
-## Mock mode
+### 3. Install the package
 
 ```bash
-python run.py --mock \
-  "Build a house with a blue door, green walls, and a red roof."
+# Everything (recommended for development): runtime + dev tools + voice
+python -m pip install -e ".[dev,voice]"
+
+# Runtime only
+python -m pip install -e .
 ```
 
-The mock robot records lifecycle calls, the mock policy records all six instructions, and the
-mock verifier can succeed, fail one layer once, or permanently fail one layer.
+Dependency groups:
 
-## Real SO-101 configuration
+- **runtime** — `numpy`, `opencv-python` (HSV color segmentation), `PyYAML`.
+- **dev** — `pytest`, `ruff`, `mypy`.
+- **voice** — `SpeechRecognition`, `PyAudio` (microphone input for `voice_control.py`).
 
-Set `mock_mode: false` in `config.yaml`, then replace the robot port, ID, and home pose. Validate
-joint ordering, units, gripper behavior, stop behavior, and home motion at low speed. The values
-in the repository are placeholders, not hardware defaults.
+Verify the install with no hardware attached:
 
-## MolmoAct2 adapter notes
+```bash
+pytest
+ruff check .
+mypy src/house_builder
+```
 
-The default checkpoint is `lerobot/MolmoAct2-SO100_101-LeRobot`.
-`policy.local_checkpoint` can select a local fine-tuned checkpoint. `policy.py` checks CUDA and
-contains all policy-side LeRobot imports. `robot.py` contains all SO-101-side LeRobot imports.
+### 4. Configure the robot
 
-Both files mark uncertain integration code with:
+Edit the `robot` section of `config.yaml` with your hardware values (the defaults are
+placeholders, not working values):
+
+```yaml
+robot:
+  type: so101_follower
+  port: /dev/REPLACE_WITH_SO101_PORT   # e.g. /dev/ttyACM0 (Linux) or /dev/tty.usbmodem* (macOS)
+  id: replace_with_robot_id
+  home_pose: [0, 0, 0, 0, 0, 0]        # calibrate to a safe home pose
+```
+
+Validate joint ordering, units, gripper behavior, stop behavior, and home motion at low speed
+before any policy rollout.
+
+### 5. Install and adapt LeRobot + MolmoAct2
+
+Install the LeRobot release your SO-101 setup uses (follow its own instructions), then adapt the
+two integration boundaries. All version-specific imports live in exactly two files:
+
+- `src/house_builder/robot.py` — SO-101 connect, home, stop, observation, action.
+- `src/house_builder/policy.py` — MolmoAct2 load and rollout.
+
+Both mark the spots to edit with:
 
 ```python
 # ADAPT TO INSTALLED LEROBOT VERSION
 ```
 
-Those sections raise clear errors until adapted to the documented API of the pinned LeRobot
-release. They do not claim guessed function names are stable. Every policy call receives one
-short instruction, `cam0`, `cam1`, and current joint state.
+Until adapted, those sections raise clear errors instead of guessing unstable APIs. Configure the
+policy in `config.yaml`:
 
-## Cameras
+```yaml
+policy:
+  checkpoint: lerobot/MolmoAct2-SO100_101-LeRobot
+  local_checkpoint: null        # set a path to use a local fine-tuned checkpoint
+  device: cuda                  # CUDA is checked at load time
+  skill_duration_seconds: 10
+```
 
-- `cam0`: policy observation only
-- `cam1`: color, horizontal alignment, layer height, support color, and stability
+Each policy call receives one short instruction plus `cam0`, `cam1`, and current joint state.
 
-Both default to 640×480 at 30 FPS. All target coordinates, height bands, and thresholds in
-`config.yaml` are examples requiring calibration after rigid camera mounting.
+### 6. Connect and configure cameras
+
+| Camera    | Role                                                              | Config key       |
+| --------- | ----------------------------------------------------------------- | ---------------- |
+| `cam0`    | policy observation only                                           | `cameras.cam0`   |
+| `cam1`    | color, horizontal alignment, layer height, support, stability     | `cameras.cam1`   |
+| `camera3` | human-built model-house input for `human_builder.py`              | `cameras.camera3`|
+
+Set the correct OS capture `index` for each camera in `config.yaml`. All default to 640×480 at
+30 FPS.
+
+### 7. Calibrate vision (required before real hardware)
+
+Every pixel value in `config.yaml` is an example and must be calibrated after the cameras and jig
+are rigidly mounted. Because image Y grows downward, the door band has the largest Y values and
+the roof the smallest; keep the three bands ordered and non-overlapping.
+
+1. Build a correct reference stack (door, wall, roof).
+2. Capture a still from each camera (for `camera3`: `python human_builder.py --image saved.jpg`,
+   or any screenshot).
+3. Read the pixel Y-range each layer occupies and set `min_y`/`max_y`.
+
+Calibrate these blocks:
+
+- `verification.height_regions` — layer bands seen by `cam1`.
+- `verification.target_x`, `max_center_error_px`, `max_stack_alignment_error_px`,
+  `stability_frames`, `max_stability_movement_px`, `min_color_occupancy`, `min_color_margin`.
+- `human_builder.height_regions` and its `min_color_occupancy` / `min_color_margin` for `camera3`.
+
+### 8. Microphone (voice control)
+
+Install the `voice` extra (section 3) and PortAudio (section 1). Microphone mode uses the Google
+recognizer from `SpeechRecognition`, so it requires network access. To find a device index or
+debug without a mic, use `--text` (section "Voice-controlled staged build").
+
+### Quick start
+
+```bash
+# 1. Install
+python -m pip install -e ".[dev,voice]"
+
+# 2. (no hardware) confirm the toolchain
+pytest && ruff check . && mypy src/house_builder
+
+# 3. One-shot build from a typed request
+python run.py "Build a house with a red door, yellow walls, and a blue roof."
+
+# 4. One-shot build from a model-house image
+python run.py "$(python human_builder.py --image model_house.jpg)"
+
+# 5. Voice-driven staged build
+python voice_control.py            # or: python voice_control.py --text
+```
 
 ## Human-built model input
 
-`human_builder.py` reads a human-built model house from `cam1`, detects the dominant allowed
+`human_builder.py` reads a human-built model house from `camera3`, detects the dominant allowed
 color in each calibrated layer band, and emits a sentence accepted by the harness:
 
 ```bash
@@ -178,13 +278,40 @@ It can also process a saved side-camera image:
 python human_builder.py --image model_house.jpg
 ```
 
-Feed the generated sentence directly into mock mode:
+The voice controller invokes this scan when it hears `Build this`. You can still feed a saved
+image directly into the one-shot harness:
 
 ```bash
-python run.py --mock "$(python human_builder.py --image model_house.jpg)"
+python run.py "$(python human_builder.py --image model_house.jpg)"
 ```
 
 The detector rejects missing or ambiguous colors rather than guessing.
+
+## Voice-controlled staged build
+
+Start the microphone controller:
+
+```bash
+python voice_control.py
+```
+
+It recognizes these commands:
+
+- **`Build this`** — captures `camera3`, parses the model house, and stores the resulting build
+  request. The robot does not move yet.
+- **`start`** — connects and homes the robot, then executes and verifies the door layer.
+- **`build wall`** — executes only after the door passed verification.
+- **`build roof`** — executes only after the wall passed verification, then safely closes the
+  completed session.
+- **`stop`** — stops and disconnects safely.
+
+Recognition uses the Google recognizer provided by `SpeechRecognition`, so microphone mode
+requires network access. For setup and debugging without speech recognition, type the same
+commands:
+
+```bash
+python voice_control.py --text
+```
 
 ## Cam1 color-stack verification
 
@@ -216,15 +343,12 @@ python run.py \
   "Build a house with a red door, yellow walls, and a blue roof."
 ```
 
-The resulting six skills are:
+The resulting three MolmoAct2 skills are:
 
 ```text
-Pick up the red door block.
-Place the held red door block in the house foundation position.
-Pick up the yellow wall block.
-Stack the held yellow wall block directly on top of the door block.
-Pick up the blue roof block.
-Stack the held blue roof block directly on top of the wall block.
+Pick up the red block and place it on the black rectangle.
+Pick up the yellow block and stack it on the first red block.
+Pick up the blue triangle block and stack it on the second yellow block.
 ```
 
 Ctrl+C and exceptions use the same `finally` cleanup to stop and disconnect the robot and close
@@ -258,25 +382,24 @@ restacking, and collapse detection are independently validated.
 
 ## Fine-tuning data
 
-Collect short episodes with one language label each:
+Collect episodes using the same combined language labels sent during building:
 
 ```text
-Pick up the red door block.
-Pick up the blue door block.
+Pick up the red block and place it on the black rectangle.
+Pick up the blue block and place it on the black rectangle.
 
-Pick up the yellow wall block.
-Pick up the green wall block.
+Pick up the yellow block and stack it on the first red block.
+Pick up the yellow block and stack it on the first blue block.
+Pick up the green block and stack it on the first red block.
+Pick up the green block and stack it on the first blue block.
 
-Pick up the red roof block.
-Pick up the blue roof block.
-
-Place the held door block in the house foundation position.
-Stack the held wall block directly on top of the door block.
-Stack the held roof block directly on top of the wall block.
+Pick up the red triangle block and stack it on the second green block.
+Pick up the red triangle block and stack it on the second yellow block.
+Pick up the blue triangle block and stack it on the second green block.
+Pick up the blue triangle block and stack it on the second yellow block.
 ```
 
 Keep `Door blocks | Wall blocks | Roof blocks` grouping, but vary color order and valid positions
-within each group. Collect fixed-foundation door placement separately from wall-on-door and
-roof-on-wall stacking. Record synchronized `cam0`, `cam1`, joint state, actions, gripper state,
-instruction, and success metadata. Combine all skills into one multitask MolmoAct2 fine-tuning
-dataset with separate language labels.
+within each group. Record synchronized `cam0`, `cam1`, joint state, actions, gripper state,
+instruction, and success metadata. Combine all ten skills into one multitask MolmoAct2
+fine-tuning dataset with separate language labels.

@@ -1,4 +1,4 @@
-"""Mock and LeRobot-backed SO-101 robot implementations."""
+"""SO-101 robot interface and LeRobot integration boundary."""
 
 from typing import Any
 
@@ -23,45 +23,6 @@ class Robot:
 
     def send_action(self, action: object) -> None:
         raise NotImplementedError
-
-
-class MockRobot(Robot):
-    """In-memory robot that records lifecycle and actions."""
-
-    def __init__(self) -> None:
-        self.connected = False
-        self.stopped = False
-        self.disconnected = False
-        self.home_count = 0
-        self.actions: list[object] = []
-
-    def connect(self) -> None:
-        self.connected = True
-        self.disconnected = False
-        self.stopped = False
-
-    def disconnect(self) -> None:
-        self.connected = False
-        self.disconnected = True
-
-    def move_home(self) -> None:
-        self._require_connected()
-        self.home_count += 1
-
-    def stop(self) -> None:
-        self.stopped = True
-
-    def get_observation(self) -> dict[str, Any]:
-        self._require_connected()
-        return {"joint_state": [0.0] * 6}
-
-    def send_action(self, action: object) -> None:
-        self._require_connected()
-        self.actions.append(action)
-
-    def _require_connected(self) -> None:
-        if not self.connected:
-            raise RuntimeError("Mock robot is not connected.")
 
 
 class SO101Robot(Robot):
