@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { BuildStatus } from '../hooks/useBuildStatus'
 import type { Color } from '../types'
+import { HousePreview3D } from './HousePreview3D'
 
 const DOOR_ROOF_COLORS: Color[] = ['red', 'blue']
 const WALL_COLORS: Color[] = ['yellow', 'green']
@@ -93,6 +94,8 @@ export function BuildControl({ status }: { status: BuildStatus }) {
         Human builder: {status.features.humanBuilder ? 'enabled' : 'disabled'} · Camera
         verification: {status.features.cameraVerification ? 'enabled' : 'disabled'}
       </p>
+
+      <HousePreview3D selection={{ door, wall, roof }} />
 
       <div className="mode-toggle">
         <label>

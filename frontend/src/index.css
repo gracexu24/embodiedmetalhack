@@ -177,6 +177,16 @@ button.danger {
   font-size: 14px;
 }
 
+.house-preview-3d {
+  width: 100%;
+  height: 260px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  margin-top: 8px;
+}
+
 .color-pickers {
   display: flex;
   gap: 12px;
