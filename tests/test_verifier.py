@@ -22,6 +22,7 @@ _BGR = {
     Color.RED: (0, 0, 255),
     Color.YELLOW: (0, 255, 255),
     Color.BLUE: (255, 0, 0),
+    Color.GREEN: (0, 255, 0),
 }
 
 
@@ -58,7 +59,7 @@ def frame_with_stack(
 
 def test_cam1_verifies_each_color_above_previous_color() -> None:
     door = Block(Layer.DOOR, Color.RED)
-    wall = Block(Layer.WALL, Color.YELLOW)
+    wall = Block(Layer.WALL, Color.GREEN)
     roof = Block(Layer.ROOF, Color.BLUE)
     frames = (
         [frame_with_stack([door])] * 2

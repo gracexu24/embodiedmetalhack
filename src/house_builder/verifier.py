@@ -9,10 +9,11 @@ import numpy as np
 
 from .models import Block, Color, Layer, VerificationResult
 
-_HSV_RANGES = {
+COLOR_HSV_RANGES = {
     Color.RED: [((0, 90, 70), (10, 255, 255)), ((170, 90, 70), (179, 255, 255))],
     Color.YELLOW: [((20, 80, 80), (40, 255, 255))],
     Color.BLUE: [((90, 70, 50), (135, 255, 255))],
+    Color.GREEN: [((41, 60, 50), (85, 255, 255))],
 }
 
 
@@ -165,7 +166,7 @@ class PlacementVerifier:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        for lower, upper in _HSV_RANGES[color]:
+        for lower, upper in COLOR_HSV_RANGES[color]:
             mask = cv2.bitwise_or(
                 mask, cv2.inRange(hsv, np.asarray(lower), np.asarray(upper))
             )

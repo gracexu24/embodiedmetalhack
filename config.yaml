@@ -32,6 +32,7 @@ verification:
   stability_frames: 10
   max_stability_movement_px: 5
   min_color_occupancy: 0.01
+  min_color_margin: 0.005
 
   # EXAMPLE SIDE-CAMERA BANDS: calibrate before running real hardware.
   height_regions:

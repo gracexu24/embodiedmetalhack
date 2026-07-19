@@ -8,12 +8,18 @@ Mock mode works without a robot, cameras, CUDA, LeRobot, or MolmoAct2.
 
 ## House and physical layout
 
-Every house is exactly `door` (bottom), `wall` (middle), and `roof` (top). Each is red, yellow,
-or blue. The nine available blocks are laid out in layer groups:
+Every house is exactly `door` (bottom), `wall` (middle), and `roof` (top). Colors are restricted
+by physical layer:
+
+- door: red or blue
+- wall: yellow or green
+- roof: red or blue
+
+The six available blocks are laid out in layer groups:
 
 ```text
-Door blocks                       Wall blocks                       Roof blocks
-Red door  Yellow door  Blue door | Red wall  Yellow wall  Blue wall | Red roof  Yellow roof  Blue roof
+Door blocks        Wall blocks          Roof blocks
+Red door  Blue door | Yellow wall  Green wall | Red roof  Blue roof
 ```
 
 Color order may vary within each group so the policy learns block identity instead of one fixed
@@ -23,8 +29,8 @@ coordinate.
 
 ```text
 Build a house with a red door, yellow walls, and a blue roof.
-Make the door blue, the walls red, and the roof yellow.
-I want a yellow roof with blue walls and a red door.
+Make the door blue, the walls green, and the roof red.
+I want a blue roof with green walls and a red door.
 Create a blue-door, yellow-wall, red-roof house.
 ```
 
@@ -34,11 +40,11 @@ allows either `red door` or `door red`. Missing, conflicting, and unsupported co
 ## Architecture
 
 ```text
-"Red door, yellow walls, blue roof"
+"Red door, green walls, blue roof"
                  ↓
           Sentence parser
                  ↓
-     [red door, yellow wall, blue roof]
+     [red door, green wall, blue roof]
                  ↓
          Three-step planner
                  ↓
@@ -82,6 +88,7 @@ so101-house-builder/
 ├── requirements.txt
 ├── pyproject.toml
 ├── config.yaml
+├── human_builder.py
 ├── run.py
 ├── src/house_builder/
 │   ├── __init__.py
@@ -97,6 +104,7 @@ so101-house-builder/
     ├── test_parser.py
     ├── test_planner.py
     ├── test_builder.py
+    ├── test_human_builder.py
     └── test_verifier.py
 ```
 
@@ -118,7 +126,7 @@ python -m pip install -e ".[dev]"
 
 ```bash
 python run.py --mock \
-  "Build a house with a blue door, red walls, and a yellow roof."
+  "Build a house with a blue door, green walls, and a red roof."
 ```
 
 The mock robot records lifecycle calls, the mock policy records all six instructions, and the
@@ -154,9 +162,33 @@ short instruction, `cam0`, `cam1`, and current joint state.
 Both default to 640×480 at 30 FPS. All target coordinates, height bands, and thresholds in
 `config.yaml` are examples requiring calibration after rigid camera mounting.
 
+## Human-built model input
+
+`human_builder.py` reads a human-built model house from `cam1`, detects the dominant allowed
+color in each calibrated layer band, and emits a sentence accepted by the harness:
+
+```bash
+python human_builder.py
+# Build a house with a red door, green walls, and a blue roof.
+```
+
+It can also process a saved side-camera image:
+
+```bash
+python human_builder.py --image model_house.jpg
+```
+
+Feed the generated sentence directly into mock mode:
+
+```bash
+python run.py --mock "$(python human_builder.py --image model_house.jpg)"
+```
+
+The detector rejects missing or ambiguous colors rather than guessing.
+
 ## Cam1 color-stack verification
 
-Verification uses no ArUco markers. It segments red, yellow, and blue pixels from `cam1` and
+Verification uses no ArUco markers. It segments red, yellow, blue, and green pixels from `cam1` and
 searches only inside the calibrated vertical band for the current layer. For a wall or roof, it
 also finds the previously verified color in the band directly below and checks that the new
 centroid is above and horizontally aligned with that support.
@@ -230,15 +262,12 @@ Collect short episodes with one language label each:
 
 ```text
 Pick up the red door block.
-Pick up the yellow door block.
 Pick up the blue door block.
 
-Pick up the red wall block.
 Pick up the yellow wall block.
-Pick up the blue wall block.
+Pick up the green wall block.
 
 Pick up the red roof block.
-Pick up the yellow roof block.
 Pick up the blue roof block.
 
 Place the held door block in the house foundation position.

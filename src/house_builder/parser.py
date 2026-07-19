@@ -14,7 +14,6 @@ _LAYER_NAMES = {
 _UNSUPPORTED_COLORS = {
     "black",
     "brown",
-    "green",
     "grey",
     "gray",
     "orange",
