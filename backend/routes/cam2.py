@@ -33,20 +33,24 @@ def scan(request: Request) -> dict[str, object]:
     """Capture camera3, detect colors, and store the request (voice: Build this)."""
     hub: CameraHub = request.app.state.camera_hub
     runner: BuildRunner = request.app.state.build_runner
+    print("[ui] Build This: capturing camera3 scan", flush=True)
     try:
         frame = hub.latest_frame()
     except CameraUnavailableError as exc:
+        print(f"[ui] scan failed: {exc}", flush=True)
         return {"status": "camera_unavailable", "error": str(exc)}
 
     SCANS_DIR.mkdir(parents=True, exist_ok=True)
     scan_id = f"{int(time.time() * 1000)}"
     image_path = SCANS_DIR / f"{scan_id}.jpg"
     cv2.imwrite(str(image_path), frame)
+    print(f"[ui] scan saved to {image_path} (calibrate bands against this image)", flush=True)
 
     try:
         house_request = runner.detect_from_frame(frame)
         stored = runner.set_request(house_request)
     except (BuildAlreadyRunningError, ValueError) as exc:
+        print(f"[ui] scan detection failed: {exc}", flush=True)
         return {
             "status": "captured",
             "scan_id": scan_id,

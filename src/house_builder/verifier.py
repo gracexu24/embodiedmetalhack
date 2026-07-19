@@ -65,18 +65,46 @@ class PlacementVerifier:
         support_pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
         current_region = self.config["height_regions"][expected_block.layer.value]
 
-        for _ in range(frame_count):
+        print(
+            f"[calib] verifying {expected_block.color.value} {expected_block.layer.value} "
+            f"in cam1 band y={current_region['min_y']}..{current_region['max_y']} "
+            f"over {frame_count} frames "
+            f"(target_x={self.config['target_x']}, "
+            f"max_center_error_px={self.config['max_center_error_px']})",
+            flush=True,
+        )
+        for frame_index in range(frame_count):
             frame = self._read("cam1")
             current = self._detect_color(frame, expected_block.color, current_region)
             if current is None:
+                print(
+                    f"[calib]   frame {frame_index + 1}/{frame_count}: "
+                    f"{expected_block.color.value} not detected in band",
+                    flush=True,
+                )
                 continue
-            current_centers.append(current)
+            support_text = ""
             if self._placed_blocks:
                 support_block = self._placed_blocks[-1]
                 support_region = self.config["height_regions"][support_block.layer.value]
                 support = self._detect_color(frame, support_block.color, support_region)
                 if support is not None:
                     support_pairs.append((current, support))
+                    support_text = (
+                        f", support {support_block.color.value} at "
+                        f"({support[0]:.1f}, {support[1]:.1f}), "
+                        f"x offset {abs(current[0] - support[0]):.1f}px"
+                    )
+                else:
+                    support_text = f", support {support_block.color.value} NOT detected"
+            print(
+                f"[calib]   frame {frame_index + 1}/{frame_count}: centroid "
+                f"({current[0]:.1f}, {current[1]:.1f}), "
+                f"x error {abs(current[0] - float(self.config['target_x'])):.1f}px"
+                f"{support_text}",
+                flush=True,
+            )
+            current_centers.append(current)
 
         correct_block = len(current_centers) == frame_count
         correct_height = correct_block
@@ -95,6 +123,15 @@ class PlacementVerifier:
         }
         reasons = [reason for reason, passed in checks.items() if not passed]
         success = correct_block and correct_position and correct_height and stable
+        print(
+            f"[calib] result {expected_block.color.value} {expected_block.layer.value}: "
+            f"{'PASS' if success else 'FAIL'} "
+            f"(visible {len(current_centers)}/{frame_count} frames, "
+            f"centered={centered}, supported={supported}, stable={stable})",
+            flush=True,
+        )
+        if reasons:
+            print(f"[calib]   failed checks: {'; '.join(reasons)}", flush=True)
         result = VerificationResult(
             success,
             correct_block,
@@ -146,6 +183,13 @@ class PlacementVerifier:
         if not camera.isOpened():
             camera.release()
             raise RuntimeError(f"Could not open required camera {name}.")
+        actual_w = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(
+            f"[calib] opened {name} index={settings['index']} "
+            f"requested={settings['width']}x{settings['height']} actual={actual_w}x{actual_h}",
+            flush=True,
+        )
         self._cameras[name] = camera
 
     def _read(self, name: str) -> np.ndarray:

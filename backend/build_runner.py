@@ -118,6 +118,7 @@ class BuildRunner:
                 self.run_id = uuid.uuid4().hex[:12]
                 self.history = []
                 self.state = BuildState.IDLE.value
+        print(f"[ui] request stored (run {self.run_id}): {self.request_sentence}", flush=True)
         self._broadcast(self.status_event())
         return {
             "run_id": self.run_id,
@@ -144,10 +145,18 @@ class BuildRunner:
         }
         action = aliases.get(normalized)
         if action is None:
+            print(f"[ui] rejected unknown command: {command!r}", flush=True)
             return {"error": f"Unknown command: {command}"}
 
+        print(
+            f"[ui] command {action!r} received "
+            f"(state={self.state}, completed={self.completed_layers}, "
+            f"failed={self.failed_layer}, busy={self._busy})",
+            flush=True,
+        )
         with self._lock:
             if self._busy and action != "stop":
+                print(f"[ui] command {action!r} rejected: a command is already running", flush=True)
                 raise BuildAlreadyRunningError("A build command is already running.")
             self._loop = asyncio.get_running_loop()
             if action == "stop":
@@ -238,11 +247,25 @@ class BuildRunner:
             elif action == "retry_last_step":
                 if self._builder is None:
                     raise RuntimeError("There is no failed step to retry.")
+                print(
+                    f"[ui] retrying failed layer: {self.failed_layer}",
+                    flush=True,
+                )
                 result = self._builder.retry_last_step()
                 self._result_payload(result)
+            if self.result is not None:
+                print(
+                    f"[ui] command {action!r} finished: "
+                    f"success={self.result['success']}, "
+                    f"completed={self.result['completed_layers']}, "
+                    f"failed={self.result['failed_layer']}, "
+                    f"message={self.result['message']!r}",
+                    flush=True,
+                )
             self._broadcast({"type": "result", "run_id": self.run_id, "result": self.result})
         except Exception as exc:  # noqa: BLE001 -- surface any failure to the dashboard
             log.exception("Command %s failed", action)
+            print(f"[ui] command {action!r} raised: {exc}", flush=True)
             self.result = {
                 "success": False,
                 "completed_layers": list(self.completed_layers),
@@ -294,6 +317,7 @@ class BuildRunner:
             self._broadcast(self.status_event())
 
     def _stop(self) -> None:
+        print("[ui] stop requested: closing build session", flush=True)
         try:
             if self._builder is not None:
                 self._builder.close()

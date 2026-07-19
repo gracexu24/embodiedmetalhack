@@ -38,6 +38,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.build_runner = BuildRunner(config, rerun_endpoints)
 
+    print("[ui] dashboard backend ready", flush=True)
+    print("[ui]   API:          http://localhost:8000 (docs at /docs)", flush=True)
+    print(f"[ui]   frontend dev: {FRONTEND_DEV_ORIGIN} (npm run dev in frontend/)", flush=True)
+    print(f"[ui]   Rerun viewer: {rerun_endpoints.viewer_url}", flush=True)
+    print(f"[ui]   Rerun gRPC:   {rerun_endpoints.grpc_uri}", flush=True)
+    print(
+        f"[ui]   camera3:      {'available' if camera_hub.available else 'UNAVAILABLE'} "
+        f"(config: {config['cameras'].get('camera3')})",
+        flush=True,
+    )
+    print(f"[ui]   robot dry_run: {config['robot'].get('dry_run', False)}", flush=True)
+    print(f"[ui]   policy server: {config['policy'].get('server', 'n/a')}", flush=True)
+
     yield
 
     camera_hub.stop()

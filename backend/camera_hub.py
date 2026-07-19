@@ -55,6 +55,14 @@ class CameraHub:
                 exc_info=True,
             )
             return
+        actual_w = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(
+            f"[ui] camera3 hub started: index={self._config['index']} "
+            f"requested={self._config['width']}x{self._config['height']} "
+            f"actual={actual_w}x{actual_h}",
+            flush=True,
+        )
         self._capture = capture
         self.available = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)

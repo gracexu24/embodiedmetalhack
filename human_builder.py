@@ -20,6 +20,8 @@ def detect_model_house(
     verification_config: dict[str, Any],
 ) -> HouseRequest:
     """Detect the allowed color in each calibrated camera3 layer band."""
+    height, width = frame.shape[:2]
+    print(f"[calib] camera3 frame: {width}x{height}", flush=True)
     detected: dict[Layer, Color] = {}
     for layer in Layer:
         region = verification_config["height_regions"][layer.value]
@@ -31,12 +33,19 @@ def detect_model_house(
         best_color, best_score = ranked[0]
         minimum = float(verification_config.get("min_color_occupancy", 0.01))
         margin = float(verification_config.get("min_color_margin", 0.005))
+        score_text = ", ".join(f"{color.value}={score:.4f}" for color, score in ranked)
+        print(
+            f"[calib] {layer.value} band y={region['min_y']}..{region['max_y']}: "
+            f"{score_text} (min_occupancy={minimum}, min_margin={margin})",
+            flush=True,
+        )
         if best_score < minimum:
             raise ValueError(
                 f"No allowed {layer.value} color was visible in its camera3 height band."
             )
         if len(ranked) > 1 and best_score - ranked[1][1] < margin:
             raise ValueError(f"Ambiguous colors in the {layer.value} height band.")
+        print(f"[calib] {layer.value} -> {best_color.value}", flush=True)
         detected[layer] = best_color
 
     return HouseRequest(
@@ -91,6 +100,14 @@ def _capture_camera3(camera_config: dict[str, Any], warmup_frames: int) -> np.nd
     if not camera.isOpened():
         camera.release()
         raise RuntimeError("Could not open camera3.")
+    actual_w = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(
+        f"[calib] opened camera3 index={camera_config['index']} "
+        f"requested={camera_config['width']}x{camera_config['height']} "
+        f"actual={actual_w}x{actual_h} (warmup={warmup_frames} frames)",
+        flush=True,
+    )
     try:
         frame: np.ndarray | None = None
         for _ in range(max(1, warmup_frames)):
