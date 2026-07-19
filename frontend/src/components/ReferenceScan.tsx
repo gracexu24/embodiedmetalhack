@@ -26,7 +26,6 @@ export function ReferenceScan() {
         Point this camera at the human-built model house, then press Build This (same as the
         voice command) to parse door / wall / roof colors.
       </p>
-      <img className="camera-preview" src="/api/cam2/preview" alt="Camera 3 live preview" />
       <button onClick={handleBuildThis} disabled={loading}>
         {loading ? 'Scanning…' : 'Build This'}
       </button>

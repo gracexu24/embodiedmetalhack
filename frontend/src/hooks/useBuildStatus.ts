@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { BuildEvent, BuildResult, BuildStateName, Transition } from '../types'
+import type { BuildEvent, BuildResult, BuildStateName, Highlight, Transition } from '../types'
 
 export interface BuildStatus {
   runId: string | null
@@ -11,6 +11,7 @@ export interface BuildStatus {
   failedLayer: string | null
   busy: boolean
   connected: boolean
+  highlights: Highlight[]
   features: {
     cameraVerification: boolean
     humanBuilder: boolean
@@ -27,6 +28,7 @@ const INITIAL_STATUS: BuildStatus = {
   failedLayer: null,
   busy: false,
   connected: false,
+  highlights: [],
   features: {
     cameraVerification: true,
     humanBuilder: true,
@@ -60,11 +62,18 @@ export function useBuildStatus(): BuildStatus {
               completedLayers: data.completed_layers ?? [],
               failedLayer: data.failed_layer ?? null,
               busy: Boolean(data.busy),
+              // A different run means a different reel; the server replays the new run's
+              // highlights right after this status event.
+              highlights: data.run_id !== prev.runId ? [] : prev.highlights,
               features: {
                 cameraVerification: data.features?.camera_verification ?? true,
                 humanBuilder: data.features?.human_builder ?? true,
               },
             }
+          case 'highlights_reset':
+            return { ...prev, highlights: [] }
+          case 'highlight':
+            return { ...prev, highlights: [...prev.highlights, data.highlight] }
           case 'transition':
             return {
               ...prev,

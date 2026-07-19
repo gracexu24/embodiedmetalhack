@@ -1,6 +1,5 @@
 import { useBuildStatus } from './hooks/useBuildStatus'
 import { BuildControl } from './components/BuildControl'
-import { ReferenceScan } from './components/ReferenceScan'
 import { LiveMonitor } from './components/LiveMonitor'
 import { HighlightsReel } from './components/HighlightsReel'
 
@@ -14,9 +13,8 @@ function App() {
       </header>
       <div className="dashboard-grid">
         <BuildControl status={status} />
-        {status.features.humanBuilder && <ReferenceScan />}
-        <LiveMonitor />
         <HighlightsReel status={status} />
+        <LiveMonitor />
       </div>
     </div>
   )

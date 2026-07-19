@@ -21,9 +21,21 @@ class BuildState(str, Enum):
 
 _ALLOWED: dict[BuildState, set[BuildState]] = {
     BuildState.IDLE: {BuildState.CONNECTING},
-    BuildState.CONNECTING: {BuildState.HOMING, BuildState.FAILED},
+    # Auto-homing was removed (builder.prepare no longer homes -- it runs the policy from
+    # the arm's current pose), so a prepared build goes straight from CONNECTING to
+    # EXECUTING. HOMING stays allowed for an optional operator-initiated home.
+    BuildState.CONNECTING: {BuildState.HOMING, BuildState.EXECUTING, BuildState.FAILED},
     BuildState.HOMING: {BuildState.EXECUTING, BuildState.FAILED},
-    BuildState.EXECUTING: {BuildState.VERIFYING, BuildState.FAILED},
+    # Verification was removed: the operator paces the build, pausing each task when it
+    # looks done. A finished layer therefore goes straight to the next layer's EXECUTING
+    # (a new task on the same session) or, on the last layer, straight to COMPLETED --
+    # there's no VERIFYING step in between. VERIFYING stays allowed for compatibility.
+    BuildState.EXECUTING: {
+        BuildState.EXECUTING,
+        BuildState.VERIFYING,
+        BuildState.COMPLETED,
+        BuildState.FAILED,
+    },
     BuildState.VERIFYING: {
         BuildState.EXECUTING,
         BuildState.COMPLETED,

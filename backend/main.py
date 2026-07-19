@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    # Graceful shutdown: release the robot (torque off + disconnect) so a stopped server
+    # never leaves the arm energized. Only runs on Ctrl-C / SIGTERM, not kill -9.
+    app.state.build_runner.shutdown()
     camera_hub.stop()
 
 
