@@ -76,7 +76,7 @@ class MockRobot(Robot):
     def get_observation(self) -> dict[str, Any]:
         self._require_connected()
         joint_state = [0.0] * 6
-        _log_joint_state("/harness/mock_arm", dict(zip(SO101_MOTOR_ORDER, joint_state)))
+        _log_joint_state("/harness/arm", dict(zip(SO101_MOTOR_ORDER, joint_state)))
         return {"joint_state": joint_state}
 
     def send_action(self, action: object) -> None:
@@ -84,7 +84,7 @@ class MockRobot(Robot):
         self.actions.append(action)
         if isinstance(action, dict):
             _log_joint_state(
-                "/harness/mock_arm",
+                "/harness/arm",
                 {k.removesuffix(".pos"): v for k, v in action.items() if isinstance(v, (int, float))},
             )
 

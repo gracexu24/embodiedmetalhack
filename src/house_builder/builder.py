@@ -1,6 +1,7 @@
 """Readable three-layer build loop."""
 
 import logging
+from collections.abc import Callable
 
 from .models import Block, BuildResult, HouseRequest, Layer
 from .planner import create_build_plan
@@ -17,12 +18,14 @@ class HouseBuilder:
         policy: Policy,
         verifier: PlacementVerifier,
         duration_seconds: float = 10.0,
+        on_state_change: Callable[[BuildState, BuildState], None] | None = None,
     ) -> None:
         self.robot = robot
         self.policy = policy
         self.verifier = verifier
         self.duration_seconds = duration_seconds
-        self.state_machine = BuildStateMachine()
+        self.on_state_change = on_state_change
+        self.state_machine = BuildStateMachine(on_transition=on_state_change)
         self.log = logging.getLogger(__name__)
 
     def build(self, request: HouseRequest) -> BuildResult:
@@ -30,7 +33,7 @@ class HouseBuilder:
         plan = create_build_plan(request)
         completed: list[Layer] = []
         self.log.info("Parsed house request: %s", request)
-        self.state_machine = BuildStateMachine()
+        self.state_machine = BuildStateMachine(on_transition=self.on_state_change)
 
         try:
             self.state_machine.transition(BuildState.CONNECTING)

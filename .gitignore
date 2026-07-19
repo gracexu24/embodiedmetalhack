@@ -5,3 +5,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+
+# Backend dashboard runtime artifacts (per-run Rerun recordings and camera-3 scans)
+backend/recordings/
+backend/scans/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

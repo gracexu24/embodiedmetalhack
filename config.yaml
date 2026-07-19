@@ -28,6 +28,14 @@ cameras:
     width: 640
     height: 480
     fps: 30
+  # Reference camera: points at a human-built model house so the web dashboard can
+  # scan its door/wall/roof colors and turn them into a HouseRequest. Not used by
+  # run.py or the harness build loop -- only by backend/camera_hub.py.
+  cam2:
+    index: 2
+    width: 640
+    height: 480
+    fps: 30
 
 verification:
   # EXAMPLE CAM1 PIXEL VALUES: calibrate for the installed side camera.
