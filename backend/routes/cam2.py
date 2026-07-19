@@ -49,7 +49,7 @@ def scan(request: Request) -> dict[str, object]:
     try:
         house_request = runner.detect_from_frame(frame)
         stored = runner.set_request(house_request)
-    except (BuildAlreadyRunningError, ValueError) as exc:
+    except (BuildAlreadyRunningError, RuntimeError, ValueError) as exc:
         print(f"[ui] scan detection failed: {exc}", flush=True)
         return {
             "status": "captured",

@@ -14,7 +14,7 @@ function App() {
       </header>
       <div className="dashboard-grid">
         <BuildControl status={status} />
-        <ReferenceScan />
+        {status.features.humanBuilder && <ReferenceScan />}
         <LiveMonitor />
         <HighlightsReel status={status} />
       </div>

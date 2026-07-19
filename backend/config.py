@@ -19,4 +19,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     for key in ("robot", "policy", "cameras", "verification"):
         if key not in config:
             raise ValueError(f"{path} is missing the {key!r} section.")
+    features = config.get("features", {})
+    config["verification"]["enabled"] = bool(
+        features.get("camera_verification", True)
+    )
     return config

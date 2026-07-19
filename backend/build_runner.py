@@ -84,6 +84,14 @@ class BuildRunner:
             "failed_layer": self.failed_layer,
             "session_active": self._builder is not None and self._builder.session_active,
             "busy": self._busy,
+            "features": {
+                "camera_verification": bool(
+                    self.config.get("features", {}).get("camera_verification", True)
+                ),
+                "human_builder": bool(
+                    self.config.get("features", {}).get("human_builder", True)
+                ),
+            },
         }
 
     def _broadcast(self, event: dict[str, Any]) -> None:
@@ -336,6 +344,10 @@ class BuildRunner:
             self._broadcast(self.status_event())
 
     def detect_from_frame(self, frame: Any) -> HouseRequest:
+        if not self.config.get("features", {}).get("human_builder", True):
+            raise RuntimeError(
+                "Human builder is disabled. Use the UI sentence or color input."
+            )
         return detect_model_house(frame, self.config["human_builder"])
 
     def _attach_recording_sink(self, run_id: str) -> None:

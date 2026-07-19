@@ -35,13 +35,20 @@ export function BuildControl({ status }: { status: BuildStatus }) {
     return response.json()
   }
 
+  function pipelineBody() {
+    if (mode === 'sentence') return { sentence }
+    return {
+      sentence: `Build a house with a ${door} door, ${wall} walls, and a ${roof} roof.`,
+    }
+  }
+
   async function buildThisFromForm() {
     setSubmitting(true)
     setError(null)
     try {
-      const body = mode === 'sentence' ? { sentence } : { door, wall, roof }
-      const data = await postJson('/api/build/request', body)
+      const data = await postJson('/api/build/request', pipelineBody())
       if (data.error) setError(data.error)
+      if (typeof data.request_sentence === 'string') setSentence(data.request_sentence)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -53,8 +60,7 @@ export function BuildControl({ status }: { status: BuildStatus }) {
     setSubmitting(true)
     setError(null)
     try {
-      const body = mode === 'sentence' ? { sentence } : { door, wall, roof }
-      const data = await postJson('/api/build', body)
+      const data = await postJson('/api/build', pipelineBody())
       if (data.error) setError(data.error)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -80,8 +86,12 @@ export function BuildControl({ status }: { status: BuildStatus }) {
     <section className="panel">
       <h2>Build Control</h2>
       <p className="panel-subtitle">
-        Button fallbacks for the same staged voice commands. Scan camera3 (or set colors
-        below), then step through Start → Build Wall → Build Roof.
+        Text and color inputs are normalized to one build phrase, then prepare the same
+        staged pipeline as Build This. Step through Start → Build Wall → Build Roof.
+      </p>
+      <p className="note">
+        Human builder: {status.features.humanBuilder ? 'enabled' : 'disabled'} · Camera
+        verification: {status.features.cameraVerification ? 'enabled' : 'disabled'}
       </p>
 
       <div className="mode-toggle">

@@ -1,3 +1,11 @@
+features:
+  # false skips post-placement cam1 verification and accepts each policy step.
+  # cam0/cam1 are still policy observations required by MolmoAct2.
+  camera_verification: true
+  # false disables camera3 startup, reference preview, and model-house scanning.
+  # Use the UI sentence/color inputs to prepare the same canonical build request.
+  human_builder: true
+
 robot:
   # port: null -> auto-detect the calibrated follower by USB serial id (the same approach
   # replay_episode.py/deploy_policy.py use all session) -- set explicitly only if multiple

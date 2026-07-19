@@ -232,6 +232,23 @@ fast on a typo'd URL instead of failing mid-skill.
 Set the correct OS capture `index` for each camera in `config.yaml`. All default to 640×480 at
 30 FPS.
 
+### Optional camera features
+
+The two camera-dependent checks can be disabled independently:
+
+```yaml
+features:
+  camera_verification: false  # skip post-placement cam1 checks
+  human_builder: false        # disable camera3 model-house scan and UI panel
+```
+
+With `human_builder: false`, prepare builds from the dashboard's sentence or color inputs.
+Both modes generate the canonical phrase
+`Build a house with a <door> door, <wall> walls, and a <roof> roof.` and feed it through the
+same parser and staged pipeline. With `camera_verification: false`, each completed policy
+instruction is accepted without visual confirmation. `cam0` and `cam1` are still required as
+MolmoAct2 policy observations; this switch removes verification, not policy camera input.
+
 ### 7. Calibrate vision (required before real hardware)
 
 Every pixel value in `config.yaml` is an example and must be calibrated after the cameras and jig

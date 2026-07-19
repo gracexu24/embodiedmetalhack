@@ -11,6 +11,10 @@ export interface BuildStatus {
   failedLayer: string | null
   busy: boolean
   connected: boolean
+  features: {
+    cameraVerification: boolean
+    humanBuilder: boolean
+  }
 }
 
 const INITIAL_STATUS: BuildStatus = {
@@ -23,6 +27,10 @@ const INITIAL_STATUS: BuildStatus = {
   failedLayer: null,
   busy: false,
   connected: false,
+  features: {
+    cameraVerification: true,
+    humanBuilder: true,
+  },
 }
 
 /** Connects to /api/build/ws and keeps the current build status up to date. */
@@ -52,6 +60,10 @@ export function useBuildStatus(): BuildStatus {
               completedLayers: data.completed_layers ?? [],
               failedLayer: data.failed_layer ?? null,
               busy: Boolean(data.busy),
+              features: {
+                cameraVerification: data.features?.camera_verification ?? true,
+                humanBuilder: data.features?.human_builder ?? true,
+              },
             }
           case 'transition':
             return {

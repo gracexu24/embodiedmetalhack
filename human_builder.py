@@ -127,6 +127,10 @@ def capture_model_house(
     warmup_frames: int = 10,
 ) -> HouseRequest:
     """Capture camera3 and return the detected model-house request."""
+    if not config.get("features", {}).get("human_builder", True):
+        raise RuntimeError(
+            "Human builder is disabled. Use the UI sentence or color input."
+        )
     frame = _capture_camera3(
         config["cameras"]["camera3"],
         warmup_frames,

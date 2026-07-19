@@ -85,3 +85,11 @@ def test_cam1_rejects_color_not_aligned_with_support() -> None:
     result = verifier.verify(wall, 1)
     assert not result.success
     assert "centered above" in result.reason
+
+
+def test_disabled_camera_verification_accepts_layers_without_frames() -> None:
+    verifier = PlacementVerifier({**CONFIG, "enabled": False})
+
+    assert verifier.verify(Block(Layer.DOOR, Color.RED), 0).success
+    assert verifier.verify(Block(Layer.WALL, Color.GREEN), 1).success
+    assert verifier.verify(Block(Layer.ROOF, Color.BLUE), 2).success

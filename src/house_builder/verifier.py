@@ -34,6 +34,7 @@ class PlacementVerifier:
         camera_entity_paths: dict[str, str] | None = None,
     ) -> None:
         self.config = config
+        self.enabled = bool(config.get("enabled", True))
         self.camera_config = camera_config or {}
         self.calls: list[Layer] = []
         self._placed_blocks: list[Block] = []
@@ -55,6 +56,24 @@ class PlacementVerifier:
         ):
             result = VerificationResult(
                 False, False, False, False, False, "Layer does not match the verified stack."
+            )
+            self._log_result(expected_block, result)
+            return result
+
+        if not self.enabled:
+            print(
+                f"[calib] camera verification disabled: accepting "
+                f"{expected_block.color.value} {expected_block.layer.value}",
+                flush=True,
+            )
+            self._placed_blocks.append(expected_block)
+            result = VerificationResult(
+                True,
+                True,
+                True,
+                True,
+                True,
+                "Camera verification disabled by configuration.",
             )
             self._log_result(expected_block, result)
             return result

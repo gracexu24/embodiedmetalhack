@@ -177,9 +177,17 @@ def main() -> int:
     args = parser.parse_args()
 
     builder, config = _create_builder(args.config)
+
+    def provide_request() -> HouseRequest:
+        if not config.get("features", {}).get("human_builder", True):
+            raise RuntimeError(
+                "Human builder is disabled. Prepare the request from the web UI instead."
+            )
+        return capture_model_house(config)
+
     controller = VoiceBuildController(
         builder,
-        lambda: capture_model_house(config),
+        provide_request,
     )
     try:
         if args.text:

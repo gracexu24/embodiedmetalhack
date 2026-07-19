@@ -33,6 +33,10 @@ export interface StatusEvent {
   failed_layer?: string | null
   session_active?: boolean
   busy?: boolean
+  features?: {
+    camera_verification: boolean
+    human_builder: boolean
+  }
 }
 
 export interface TransitionEvent extends Transition {

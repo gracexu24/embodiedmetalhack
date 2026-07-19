@@ -32,7 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rerun_endpoints = rerun_service.start()
     app.state.rerun_endpoints = rerun_endpoints
 
-    camera_hub = CameraHub(config["cameras"].get("camera3"))
+    features = config.get("features", {})
+    human_builder_enabled = bool(features.get("human_builder", True))
+    camera_hub = CameraHub(
+        config["cameras"].get("camera3") if human_builder_enabled else None
+    )
     camera_hub.start()
     app.state.camera_hub = camera_hub
 
@@ -46,6 +50,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     print(
         f"[ui]   camera3:      {'available' if camera_hub.available else 'UNAVAILABLE'} "
         f"(config: {config['cameras'].get('camera3')})",
+        flush=True,
+    )
+    print(
+        f"[ui]   human builder: {'enabled' if human_builder_enabled else 'disabled'}",
+        flush=True,
+    )
+    print(
+        f"[ui]   verification:  "
+        f"{'enabled' if config['verification']['enabled'] else 'disabled'}",
         flush=True,
     )
     print(f"[ui]   robot dry_run: {config['robot'].get('dry_run', False)}", flush=True)
