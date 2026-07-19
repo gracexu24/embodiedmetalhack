@@ -38,6 +38,7 @@ cameras:
     width: 640
     height: 480
     fps: 30
+  # Model-house camera used by human_builder.py and the dashboard reference scan.
   camera3:
     index: 3
     width: 640

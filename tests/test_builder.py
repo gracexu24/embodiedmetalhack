@@ -140,6 +140,48 @@ def test_staged_build_rejects_wall_before_door() -> None:
         builder.close()
 
 
+def test_staged_retry_last_step_after_wall_failure() -> None:
+    robot = RecordingRobot()
+    policy = RecordingPolicy()
+    verifier = StubVerifier(fail_layer=Layer.WALL)
+    builder = HouseBuilder(robot, policy, verifier)
+    builder.prepare(REQUEST)
+
+    assert builder.build_layer(Layer.DOOR).success
+    failed = builder.build_layer(Layer.WALL)
+    assert not failed.success
+    assert failed.failed_layer is Layer.WALL
+    assert builder.session_active
+    assert builder.failed_layer is Layer.WALL
+    assert builder.completed_layers == [Layer.DOOR]
+    assert builder.state_machine.current is BuildState.FAILED
+
+    with pytest.raises(RuntimeError, match="retry the last step"):
+        builder.build_layer(Layer.WALL)
+
+    verifier.fail_layer = None
+    retried = builder.retry_last_step()
+    assert retried.success
+    assert builder.failed_layer is None
+    assert builder.completed_layers == [Layer.DOOR, Layer.WALL]
+    assert builder.session_active
+
+    roof = builder.build_layer(Layer.ROOF)
+    assert roof.success
+    assert not builder.session_active
+    assert robot.disconnected
+
+
+def test_retry_last_step_without_failure_raises() -> None:
+    builder, _, _, _ = make_builder()
+    builder.prepare(REQUEST)
+    try:
+        with pytest.raises(RuntimeError, match="no failed step"):
+            builder.retry_last_step()
+    finally:
+        builder.close()
+
+
 def test_door_verification_failure_stops_immediately() -> None:
     # A persistently-failing layer retries every check_interval_seconds until
     # duration_seconds runs out, not just once: default 10.0 / 3.0 -> checks at

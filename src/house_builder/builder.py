@@ -1,6 +1,7 @@
 """Readable three-layer build loop."""
 
 import logging
+from collections.abc import Callable
 
 from .models import Block, BuildResult, BuildStep, HouseRequest, Layer, VerificationResult
 from .planner import create_build_plan
@@ -18,6 +19,7 @@ class HouseBuilder:
         verifier: PlacementVerifier,
         duration_seconds: float = 10.0,
         check_interval_seconds: float = 3.0,
+        on_state_change: Callable[[BuildState, BuildState], None] | None = None,
     ) -> None:
         self.robot = robot
         self.policy = policy
@@ -29,10 +31,12 @@ class HouseBuilder:
         # in check_interval_seconds slices and re-verify after each one, stopping as soon
         # as the block is actually in place rather than always burning the full budget.
         self.check_interval_seconds = check_interval_seconds
-        self.state_machine = BuildStateMachine()
+        self.on_state_change = on_state_change
+        self.state_machine = BuildStateMachine(on_transition=on_state_change)
         self.log = logging.getLogger(__name__)
         self._plan: list[BuildStep] = []
         self._completed: list[Layer] = []
+        self._failed_layer: Layer | None = None
         self._session_open = False
 
     def build(self, request: HouseRequest) -> BuildResult:
@@ -54,7 +58,8 @@ class HouseBuilder:
             raise RuntimeError("A build session is already active.")
         self._plan = create_build_plan(request)
         self._completed = []
-        self.state_machine = BuildStateMachine()
+        self._failed_layer = None
+        self.state_machine = BuildStateMachine(on_transition=self.on_state_change)
         self.log.info("Prepared house request: %s", request)
         self.state_machine.transition(BuildState.CONNECTING)
         self._session_open = True
@@ -72,6 +77,26 @@ class HouseBuilder:
         """Build and verify the next requested layer in an active session."""
         if not self._session_open:
             raise RuntimeError("Prepare a build before building a layer.")
+        if self._failed_layer is not None:
+            raise RuntimeError(
+                f"{self._failed_layer.value.capitalize()} failed. "
+                "Reset the failed placement and retry the last step."
+            )
+        return self._build_layer(layer)
+
+    def retry_last_step(self) -> BuildResult:
+        """Retry the failed layer after a human has reset its placement."""
+        if not self._session_open or self._failed_layer is None:
+            raise RuntimeError("There is no failed step to retry.")
+        layer = self._failed_layer
+        self._failed_layer = None
+        self.log.info("Human reset confirmed; retrying %s layer", layer.value)
+        self.robot.enable()
+        self.robot.move_home()
+        return self._build_layer(layer)
+
+    def _build_layer(self, layer: Layer) -> BuildResult:
+        """Execute one new or explicitly retried layer."""
         layer_index = len(self._completed)
         if layer_index >= len(self._plan):
             raise RuntimeError("The house is already complete.")
@@ -88,13 +113,11 @@ class HouseBuilder:
             verification = self._run_until_verified(step, layer_index)
             self.log.info("Verification result: %s", verification)
             if not verification.success:
-                result = self._failure(
+                return self._failure(
                     self._completed,
                     step.block,
                     verification.reason or "Placement verification failed.",
                 )
-                self.close()
-                return result
 
             self._completed.append(layer)
             if len(self._completed) == len(self._plan):
@@ -150,11 +173,16 @@ class HouseBuilder:
     def session_active(self) -> bool:
         return self._session_open
 
+    @property
+    def failed_layer(self) -> Layer | None:
+        return self._failed_layer
+
     def close(self) -> None:
         """Stop and disconnect an active build session."""
         if not self._session_open:
             return
         self._session_open = False
+        self._failed_layer = None
         try:
             self.robot.stop()
         finally:
@@ -169,12 +197,13 @@ class HouseBuilder:
         expected_block: Block,
         reason: str,
     ) -> BuildResult:
+        self._failed_layer = expected_block.layer
         self.state_machine.fail()
         self.robot.stop()
         message = (
             f"{expected_block.layer.value.capitalize()} layer failed; expected "
             f"{expected_block.color.value} {expected_block.layer.value}: {reason} "
-            "Stop and have a human reset the structure."
+            'Have a human remove the failed placement, then say "retry last step".'
         )
         result = BuildResult(
             False,

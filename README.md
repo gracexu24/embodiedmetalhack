@@ -95,7 +95,9 @@ so101-house-builder/
 ├── human_builder.py
 ├── run.py
 ├── voice_control.py
-├── simulate.py           # full build loop with fake robot/policy/verifier -- no hardware, no Modal
+├── simulate.py
+├── backend/                 # FastAPI dashboard API
+├── frontend/                # React/Vite UI
 ├── src/house_builder/
 │   ├── __init__.py
 │   ├── models.py
@@ -105,14 +107,11 @@ so101-house-builder/
 │   ├── policy.py
 │   ├── state_machine.py
 │   ├── verifier.py
-│   └── builder.py
+│   ├── builder.py
+│   ├── rr_time.py
+│   ├── rr_blueprint.py
+│   └── sync_checkpoint.py
 └── tests/
-    ├── test_parser.py
-    ├── test_planner.py
-    ├── test_builder.py
-    ├── test_human_builder.py
-    ├── test_verifier.py
-    └── test_voice_control.py
 ```
 
 ## Setup
@@ -156,7 +155,7 @@ python -m pip install --upgrade pip
 
 ```bash
 # Everything (recommended for development): runtime + dev tools + voice
-python -m pip install -e ".[dev,voice]"
+python -m pip install -e ".[dev,voice,web]"
 
 # Runtime only
 python -m pip install -e .
@@ -337,15 +336,32 @@ It recognizes these commands:
 - **`build wall`** — executes only after the door passed verification.
 - **`build roof`** — executes only after the wall passed verification, then safely closes the
   completed session.
+- **`retry last step`** — after a layer fails, remove the failed placement by hand, then say this
+  to re-run only that layer. Aliases: `retry the last step`, `retry`.
 - **`stop`** — stops and disconnects safely.
 
-Recognition uses the Google recognizer provided by `SpeechRecognition`, so microphone mode
-requires network access. For setup and debugging without speech recognition, type the same
-commands:
+If a layer fails, later layer commands are rejected until you retry or stop. Recognition uses the
+Google recognizer provided by `SpeechRecognition`, so microphone mode requires network access. For
+setup and debugging without speech recognition, type the same commands:
 
 ```bash
 python voice_control.py --text
 ```
+
+## Web dashboard
+
+The FastAPI + React dashboard mirrors the staged voice commands with clickable buttons.
+
+```bash
+python -m pip install -e ".[dev,voice,web]"
+cd frontend && npm install && npm run dev   # http://localhost:5173
+# in another terminal:
+uvicorn backend.main:app --reload --port 8000
+```
+
+UI buttons: **Build This**, **Start**, **Build Wall**, **Build Roof**, **Retry Last Step**, **Stop**.
+Reference scan uses `camera3` and `human_builder.detect_model_house`. Live cam0/cam1 monitoring
+uses the embedded Rerun web viewer.
 
 ## Cam1 color-stack verification
 

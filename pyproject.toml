@@ -12,11 +12,18 @@ dependencies = [
   "numpy>=1.26",
   "opencv-python>=4.9",
   "PyYAML>=6.0",
+  "rerun-sdk>=0.34",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy>=1.10", "pytest>=8.0", "ruff>=0.5"]
 voice = ["PyAudio>=0.2.14", "SpeechRecognition>=3.14"]
+# Only needed for src/house_builder/sync_checkpoint.py (pulling a trained checkpoint
+# down from a Modal Volume). Not needed to run the harness itself.
+checkpoint-sync = ["modal>=1.0"]
+# Only needed for the backend/ FastAPI dashboard server. Not needed to run the
+# harness itself (run.py) or the test suite.
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "websockets>=12.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/house_builder"]
@@ -51,6 +58,10 @@ module = [
   "speech_recognition",
   "so100_hackathon",
   "so100_hackathon.*",
+  "rerun",
+  "rerun.*",
+  "modal",
+  "modal.*",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

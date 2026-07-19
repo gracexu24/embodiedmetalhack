@@ -21,14 +21,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from so100_hackathon.calibration import (
-    MotorCalibration,
-    load_arm_kind,
-    load_arm_ranges,
-    load_calibration,
-)
-from so100_hackathon.feetech import FeetechBus, detect_arm_ports, usb_id_from_port
-
 
 class Robot:
     """Minimal robot interface used by the builder and policy."""
@@ -44,6 +36,10 @@ class Robot:
 
     def stop(self) -> None:
         raise NotImplementedError
+
+    def enable(self) -> None:
+        """Re-enable the arm after a safe stop. Default is a no-op."""
+        return
 
     def get_observation(self) -> dict[str, Any]:
         raise NotImplementedError
@@ -68,21 +64,34 @@ class SO101Robot(Robot):
         # to the bus -- only logged. Opening the port and reading telemetry still happens,
         # so a dry run's logged "current" state is real, not faked.
         self.dry_run = bool(config.get("dry_run", False))
-        self._bus: FeetechBus | None = None
-        self._calibration: list[MotorCalibration] = []
+        self._bus: Any | None = None
+        self._calibration: list[Any] = []
         self._range_min: list[int] = []
         self._range_max: list[int] = []
         self._connected = False
         self.log = logging.getLogger(__name__)
 
     def connect(self) -> None:
+        try:
+            from so100_hackathon.calibration import (
+                load_arm_kind,
+                load_arm_ranges,
+                load_calibration,
+            )
+            from so100_hackathon.feetech import FeetechBus, detect_arm_ports, usb_id_from_port
+        except ImportError as exc:
+            raise RuntimeError(
+                "so100_hackathon is required for SO101Robot. "
+                "Install it and ensure it is importable (e.g. via the so100-hackathon pixi env)."
+            ) from exc
+
         ports = (self.port_hint,) if self.port_hint else detect_arm_ports()
         if not ports:
             raise RuntimeError(
                 "No SO-100/101 arms found (no /dev/cu.usbmodem* ports); set robot.port explicitly."
             )
 
-        candidates: list[tuple[str, str, list[MotorCalibration], tuple[list[int], list[int]]]] = []
+        candidates: list[tuple[str, str, list[Any], tuple[list[int], list[int]]]] = []
         for candidate in ports:
             usb_id = usb_id_from_port(candidate)
             calibration_path = self.calibration_dir / f"{usb_id}.json"
@@ -144,6 +153,11 @@ class SO101Robot(Robot):
     def stop(self) -> None:
         if self._bus is not None:
             self._bus.set_torque(False)
+
+    def enable(self) -> None:
+        """Turn torque back on after stop() so a human-assisted retry can move."""
+        if self._bus is not None and not self.dry_run:
+            self._bus.set_torque(True)
 
     def get_observation(self) -> dict[str, Any]:
         self._require_connected()

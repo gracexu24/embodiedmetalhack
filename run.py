@@ -6,12 +6,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import rerun as rr
 import yaml
 
 from house_builder.builder import HouseBuilder
 from house_builder.parser import parse_house_request
 from house_builder.policy import MolmoAct2Policy
 from house_builder.robot import SO101Robot
+from house_builder.rr_blueprint import build_blueprint
 from house_builder.verifier import PlacementVerifier
 
 
@@ -30,8 +32,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build a three-block SO-101 house.")
     parser.add_argument("request", help="Natural-language description of the desired house")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
+    parser.add_argument(
+        "--no-viewer", action="store_true", help="Don't spawn the Rerun viewer (headless runs)"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    rr.init("house_builder", spawn=not args.no_viewer, default_blueprint=build_blueprint())
 
     try:
         request = parse_house_request(args.request)

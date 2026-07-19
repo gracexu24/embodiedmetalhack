@@ -24,6 +24,7 @@ class VoiceCommand(str, Enum):
     START = "start"
     BUILD_WALL = "build wall"
     BUILD_ROOF = "build roof"
+    RETRY_LAST_STEP = "retry last step"
     STOP = "stop"
     UNKNOWN = "unknown"
 
@@ -38,6 +39,9 @@ def parse_voice_command(transcript: str) -> VoiceCommand:
         "build the wall": VoiceCommand.BUILD_WALL,
         "build roof": VoiceCommand.BUILD_ROOF,
         "build the roof": VoiceCommand.BUILD_ROOF,
+        "retry last step": VoiceCommand.RETRY_LAST_STEP,
+        "retry the last step": VoiceCommand.RETRY_LAST_STEP,
+        "retry": VoiceCommand.RETRY_LAST_STEP,
         "stop": VoiceCommand.STOP,
         "quit": VoiceCommand.STOP,
         "exit": VoiceCommand.STOP,
@@ -77,6 +81,11 @@ class VoiceBuildController:
             if self.request is None:
                 self.output('Say "build this" before starting.')
                 return True
+            if self.builder.failed_layer is not None:
+                self.output(
+                    'Reset the failed placement, then say "retry last step".'
+                )
+                return True
             if not self.builder.session_active:
                 self.builder.prepare(self.request)
             result = self.builder.build_layer(Layer.DOOR)
@@ -86,6 +95,11 @@ class VoiceBuildController:
             return True
 
         if command is VoiceCommand.BUILD_WALL:
+            if self.builder.failed_layer is not None:
+                self.output(
+                    'Reset the failed placement, then say "retry last step".'
+                )
+                return True
             if not self._ready_for(Layer.DOOR, "start"):
                 return True
             result = self.builder.build_layer(Layer.WALL)
@@ -95,10 +109,27 @@ class VoiceBuildController:
             return True
 
         if command is VoiceCommand.BUILD_ROOF:
+            if self.builder.failed_layer is not None:
+                self.output(
+                    'Reset the failed placement, then say "retry last step".'
+                )
+                return True
             if not self._ready_for(Layer.WALL, "build wall"):
                 return True
             result = self.builder.build_layer(Layer.ROOF)
             self.output(result.message)
+            return True
+
+        if command is VoiceCommand.RETRY_LAST_STEP:
+            if not self.builder.session_active or self.builder.failed_layer is None:
+                self.output("There is no failed step to retry.")
+                return True
+            result = self.builder.retry_last_step()
+            self.output(result.message)
+            if result.success and result.completed_layers[-1] is Layer.DOOR:
+                self.output('Say "build wall" to continue.')
+            elif result.success and result.completed_layers[-1] is Layer.WALL:
+                self.output('Say "build roof" to continue.')
             return True
 
         if command is VoiceCommand.STOP:
@@ -106,7 +137,10 @@ class VoiceBuildController:
             self.output("Build stopped safely.")
             return False
 
-        self.output('Unknown command. Say "build this", "start", "build wall", or "build roof".')
+        self.output(
+            'Unknown command. Say "build this", "start", "build wall", '
+            '"build roof", "retry last step", or "stop".'
+        )
         return True
 
     def _ready_for(self, required_layer: Layer, required_command: str) -> bool:
@@ -165,7 +199,10 @@ def main() -> int:
             print("Calibrating microphone noise...")
             recognizer.adjust_for_ambient_noise(source, duration=1)
 
-        print('Listening. Say "build this", "start", "build wall", "build roof", or "stop".')
+        print(
+            'Listening. Say "build this", "start", "build wall", "build roof", '
+            '"retry last step", or "stop".'
+        )
         while True:
             try:
                 with microphone as source:
