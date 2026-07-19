@@ -1,7 +1,7 @@
 features:
   # false skips post-placement cam1 verification and accepts each policy step.
   # cam0/cam1 are still policy observations required by MolmoAct2.
-  camera_verification: true
+  camera_verification: false
   # false disables camera3 startup, reference preview, and model-house scanning.
   # Use the UI sentence/color inputs to prepare the same canonical build request.
   human_builder: true
