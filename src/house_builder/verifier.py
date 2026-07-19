@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import cv2
 import numpy as np
+import rerun as rr
 
 from .models import Block, Color, Layer, VerificationResult
+from .rr_time import log_step
 
 _HSV_RANGES = {
     Color.RED: [((0, 90, 70), (10, 255, 255)), ((170, 90, 70), (179, 255, 255))],
     Color.YELLOW: [((20, 80, 80), (40, 255, 255))],
     Color.BLUE: [((90, 70, 50), (135, 255, 255))],
 }
+
+DEFAULT_CAMERA_ENTITY_PATHS = {"cam0": "/harness/cameras/cam0", "cam1": "/harness/cameras/cam1"}
 
 
 class PlacementVerifier:
@@ -27,6 +32,8 @@ class PlacementVerifier:
         mock: bool = False,
         fail_once: Layer | None = None,
         fail_always: Layer | None = None,
+        camera_readers: dict[str, Callable[[], np.ndarray]] | None = None,
+        camera_entity_paths: dict[str, str] | None = None,
     ) -> None:
         self.config = config
         self.camera_config = camera_config or {}
@@ -36,12 +43,21 @@ class PlacementVerifier:
         self.calls: list[Layer] = []
         self._placed_blocks: list[Block] = []
         self._cameras: dict[str, Any] = {}
+        # camera_readers lets a caller source cam0/cam1 frames from something other
+        # than an index-addressed cv2.VideoCapture -- e.g. our pyrealsense2
+        # RealSenseCamera wrappers, keyed by serial number. Each callable must return
+        # a BGR (H, W, C) uint8 frame, matching what cv2.VideoCapture.read() returns,
+        # since _detect_color below assumes BGR input.
+        self._camera_readers = dict(camera_readers or {})
+        self._camera_entity_paths = dict(camera_entity_paths or DEFAULT_CAMERA_ENTITY_PATHS)
 
     def verify(self, expected_block: Block, layer_index: int) -> VerificationResult:
         """Verify one layer from cam1 using color and calibrated height bands."""
         self.calls.append(expected_block.layer)
         if self.mock:
-            return self._mock_result(expected_block)
+            result = self._mock_result(expected_block)
+            self._log_result(expected_block, result)
+            return result
 
         expected_order = [Layer.DOOR, Layer.WALL, Layer.ROOF]
         if (
@@ -49,9 +65,11 @@ class PlacementVerifier:
             or expected_order[layer_index] is not expected_block.layer
             or layer_index != len(self._placed_blocks)
         ):
-            return VerificationResult(
+            result = VerificationResult(
                 False, False, False, False, False, "Layer does not match the verified stack."
             )
+            self._log_result(expected_block, result)
+            return result
 
         self._open_camera("cam1")
         frame_count = int(self.config["stability_frames"])
@@ -99,10 +117,11 @@ class PlacementVerifier:
         )
         if success:
             self._placed_blocks.append(expected_block)
+        self._log_result(expected_block, result)
         return result
 
     def close(self) -> None:
-        """Release camera handles and clear the verified stack."""
+        """Release camera handles we opened ourselves and clear the verified stack."""
         for camera in self._cameras.values():
             camera.release()
         self._cameras.clear()
@@ -133,8 +152,22 @@ class PlacementVerifier:
         self._placed_blocks.append(expected_block)
         return VerificationResult(True, True, True, True, True)
 
+    def _log_result(self, expected_block: Block, result: VerificationResult) -> None:
+        log_step()
+        prefix = "/harness/verification"
+        rr.log(
+            prefix,
+            rr.TextLog(
+                f"{expected_block.color.value} {expected_block.layer.value}: "
+                f"{'PASS' if result.success else 'FAIL'}"
+                + (f" ({result.reason})" if result.reason else "")
+            ),
+        )
+        for field in ("success", "correct_block", "correct_position", "correct_height", "stable"):
+            rr.log(f"{prefix}/{field}", rr.Scalars(1.0 if getattr(result, field) else 0.0))
+
     def _open_camera(self, name: str) -> None:
-        if name in self._cameras:
+        if name in self._camera_readers or name in self._cameras:
             return
         settings = self.camera_config[name]
         camera = cv2.VideoCapture(int(settings["index"]))
@@ -147,9 +180,14 @@ class PlacementVerifier:
         self._cameras[name] = camera
 
     def _read(self, name: str) -> np.ndarray:
-        ok, frame = self._cameras[name].read()
-        if not ok or frame is None:
-            raise RuntimeError(f"Could not read required camera {name}.")
+        if name in self._camera_readers:
+            frame = self._camera_readers[name]()
+        else:
+            ok, frame = self._cameras[name].read()
+            if not ok or frame is None:
+                raise RuntimeError(f"Could not read required camera {name}.")
+        log_step()
+        rr.log(self._camera_entity_paths.get(name, f"/harness/cameras/{name}"), rr.Image(frame[:, :, ::-1]))
         return frame
 
     def _detect_color(

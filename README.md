@@ -136,15 +136,44 @@ The default checkpoint is `lerobot/MolmoAct2-SO100_101-LeRobot`.
 `policy.local_checkpoint` can select a local fine-tuned checkpoint. `policy.py` checks CUDA and
 contains all policy-side LeRobot imports. `robot.py` contains all SO-101-side LeRobot imports.
 
-Both files mark uncertain integration code with:
+Both files are now wired against `lerobot==0.6.0`'s real API (`SO101Follower`/`SO101FollowerConfig`
+for the arm, `MolmoAct2Policy.from_pretrained` + `make_molmoact2_pre_post_processors` +
+`lerobot.common.control_utils.predict_action` for the policy) instead of the placeholder
+`# ADAPT TO INSTALLED LEROBOT VERSION` stubs. Two things in `policy.py` remain assumptions rather
+than verified facts, because verifying them needs a live GPU rollout against the actual trained
+checkpoint: the camera observation key names (`image_keys`) and the action output name/order
+(`action_names`). Both default to reasonable values (see the comments in `config.yaml`) and can be
+overridden there if your checkpoint differs. `robot.py`'s `stop()` now really cuts motor torque via
+`bus.disable_torque()` rather than being a no-op.
 
-```python
-# ADAPT TO INSTALLED LEROBOT VERSION
+Every policy call receives one short instruction, `cam0`, `cam1`, and current joint state.
+
+## Rerun visualization
+
+`run.py` now spawns a [Rerun](https://rerun.io) viewer by default (`--no-viewer` for headless runs)
+showing, in real time: build-state transitions, each pick/place instruction and its outcome, arm
+joint positions, both camera feeds, and every verification check with pass/fail reasons. This works
+in `--mock` mode too — no hardware needed to see it. See `src/house_builder/rr_time.py` (the shared
+`harness_step` timeline every module logs against) and `src/house_builder/rr_blueprint.py` (the
+default viewer layout).
+
+## Syncing a trained checkpoint from Modal
+
+`src/house_builder/sync_checkpoint.py` downloads a trained checkpoint from a Modal Volume to local
+disk and prints the path to put in `config.yaml`'s `policy.local_checkpoint`. Fill in
+`MODAL_VOLUME_NAME` and `MODAL_CHECKPOINT_PATH` at the top of the file once your Modal training
+job's volume name and output path are settled, then:
+
+```bash
+python -m pip install ".[checkpoint-sync]"
+python src/house_builder/sync_checkpoint.py
 ```
 
-Those sections raise clear errors until adapted to the documented API of the pinned LeRobot
-release. They do not claim guessed function names are stable. Every policy call receives one
-short instruction, `cam0`, `cam1`, and current joint state.
+Requires Modal auth already set up locally (`modal token set`). Not independently testable without
+real Modal credentials and a real volume -- it's written against the installed `modal` SDK's actual
+method signatures (`Volume.from_name`, `.iterdir`, `.read_file_into_fileobj`), not guessed, but
+hasn't been run against a live volume. Double check the printed source -> destination paths the
+first time you run it.
 
 ## Cameras
 

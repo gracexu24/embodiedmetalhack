@@ -3,6 +3,10 @@
 import logging
 from enum import Enum
 
+import rerun as rr
+
+from .rr_time import log_step
+
 
 class BuildState(str, Enum):
     IDLE = "idle"
@@ -45,6 +49,8 @@ class BuildStateMachine:
                 f"Invalid build transition: {self.current.value} -> {next_state.value}"
             )
         self.log.info("State: %s -> %s", self.current.value, next_state.value)
+        log_step()
+        rr.log("/harness/state", rr.TextLog(f"{self.current.value} -> {next_state.value}"))
         self.current = next_state
         self.history.append(next_state)
 

@@ -12,10 +12,14 @@ dependencies = [
   "numpy>=1.26",
   "opencv-python>=4.9",
   "PyYAML>=6.0",
+  "rerun-sdk>=0.34",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy>=1.10", "pytest>=8.0", "ruff>=0.5"]
+# Only needed for src/house_builder/sync_checkpoint.py (pulling a trained checkpoint
+# down from a Modal Volume). Not needed to run the harness itself.
+checkpoint-sync = ["modal>=1.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/house_builder"]
@@ -38,6 +42,6 @@ packages = ["house_builder"]
 no_site_packages = true
 
 [[tool.mypy.overrides]]
-module = ["numpy", "numpy.*", "cv2", "cv2.*", "yaml", "yaml.*", "torch", "lerobot"]
+module = ["numpy", "numpy.*", "cv2", "cv2.*", "yaml", "yaml.*", "torch", "lerobot", "rerun", "rerun.*", "modal", "modal.*"]
 follow_imports = "skip"
 ignore_missing_imports = true
