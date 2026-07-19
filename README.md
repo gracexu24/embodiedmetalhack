@@ -1,5 +1,9 @@
 # SO-101 Three-Block House Builder
 
+<p align="center">
+  <img src="assets/block_house.png" alt="Three-block house: red door, yellow wall, blue roof" width="420">
+</p>
+
 A small Python harness that turns one natural-language request into short MolmoAct2 skills for a
 Seeed Studio SO-101. It parses three colors, plans three layers, and for each layer runs the
 combined pick-and-place instruction in short slices, re-verifying after each one and retrying
