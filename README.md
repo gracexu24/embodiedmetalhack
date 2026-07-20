@@ -1,5 +1,9 @@
 # SO-101 Three-Block House Builder
 
+<p align="center">
+  <img src="assets/block_house.png" alt="Three-block house: red door, yellow wall, blue roof" width="420">
+</p>
+
 A small Python harness that turns one natural-language request into short MolmoAct2 skills for a
 Seeed Studio SO-101. It parses three colors, plans three layers, and for each layer runs the
 combined pick-and-place instruction in short slices, re-verifying after each one and retrying
@@ -98,6 +102,8 @@ so101-house-builder/
 ├── simulate.py
 ├── backend/                 # FastAPI dashboard API
 ├── frontend/                # React/Vite UI
+├── third_party/
+│   └── so100-hackathon/     # Vendored SO-100 driver + Modal deploy scripts (see Credits)
 ├── src/house_builder/
 │   ├── __init__.py
 │   ├── models.py
@@ -124,12 +130,14 @@ without hardware; sections 4–8 are required before moving the real arm.
 - Python 3.11 or newer.
 - A Seeed Studio SO-101 follower arm on a serial port (for real builds).
 - Three cameras: overhead (`cam0`), side (`cam1`), and a model-house camera (`camera3`).
-- A clone of [so100-hackathon](https://github.com/mission-robotics-ai/so100-hackathon) with its
-  pixi environment installed (`pixi install`) -- `src/house_builder/robot.py` drives the arm
-  through that repo's own Feetech driver and calibration files, so it must be importable at run
-  time (see "Running", below). No local GPU or LeRobot install is needed for *this* repo: the
-  MolmoAct2 policy itself runs on a Modal-hosted endpoint (see `policy_server_modal_molmoact2.py`
-  in so100-hackathon), and `policy.py` just calls it over HTTP.
+- The SO-100 driver stack is **vendored in this repo** at `third_party/so100-hackathon/` (see
+  [Credits](#credits)), so there's no separate repo to clone. For real builds, install its pixi
+  environment once (`cd third_party/so100-hackathon && pixi install`) -- `src/house_builder/robot.py`
+  drives the arm through that package's own Feetech driver and calibration files, so it must be
+  importable at run time (see "Running", below). No local GPU or LeRobot install is needed for
+  *this* repo: the MolmoAct2 policy itself runs on a Modal-hosted endpoint (see
+  `third_party/so100-hackathon/tools/apps/policy_server_modal_molmoact2.py`), and `policy.py` just
+  calls it over HTTP.
 - On macOS, PortAudio for microphone input:
 
 ```bash
@@ -177,17 +185,17 @@ mypy src/house_builder
 
 ### 4. Configure the robot
 
-`src/house_builder/robot.py`'s `SO101Robot` drives the arm through so100-hackathon's own Feetech
-bus and calibration files (the same code path exercised by that repo's `replay_episode.py` /
-`deploy_policy.py`), not through a separate LeRobot robot class. Edit the `robot` section of
-`config.yaml`:
+`src/house_builder/robot.py`'s `SO101Robot` drives the arm through the vendored so100-hackathon's
+own Feetech bus and calibration files (the same code path exercised by that project's
+`replay_episode.py` / `deploy_policy.py` under `third_party/so100-hackathon/tools/apps/`), not
+through a separate LeRobot robot class. Edit the `robot` section of `config.yaml`:
 
 ```yaml
 robot:
   port: null                    # null -> auto-detect the calibrated follower by USB serial id;
                                  # set explicitly only if multiple calibrated followers are plugged
                                  # in at once
-  calibration_dir: /absolute/path/to/so100-hackathon/calibrations
+  calibration_dir: /absolute/path/to/embodiedmetalhack/third_party/so100-hackathon/calibrations
   home_pose: [0, 0, 0, 0, 0, 0] # calibrated middle pose, gripper closed -- already a safe default
                                  # under this calibration convention, not a placeholder
   max_step_deg: 10.0             # per-joint, per-tick motion cap -- the safety net against a bad
@@ -202,9 +210,10 @@ before any policy rollout -- start with `dry_run: true`.
 ### 5. Configure the policy (Modal-hosted MolmoAct2)
 
 `src/house_builder/policy.py`'s `MolmoAct2Policy` doesn't load a model locally -- it calls a
-Modal-hosted `/act` HTTP endpoint (see so100-hackathon's `tools/apps/policy_server_modal_molmoact2.py`,
-or a fine-tuned variant deployed the same way). Deploy that server first (`modal deploy ...` from
-so100-hackathon), then point this repo at it:
+Modal-hosted `/act` HTTP endpoint (see `third_party/so100-hackathon/tools/apps/policy_server_modal_molmoact2.py`,
+or a fine-tuned variant deployed the same way). Deploy that server first from the vendored copy
+(`cd third_party/so100-hackathon && pixi run modal deploy tools/apps/policy_server_modal_molmoact2.py`),
+then point this repo at it:
 
 ```yaml
 policy:
@@ -277,15 +286,18 @@ debug without a mic, use `--text` (section "Voice-controlled staged build").
 
 `robot.py` imports `so100_hackathon.feetech`/`so100_hackathon.calibration` directly, so any
 command below that touches real hardware (`run.py`, `voice_control.py` -- not `simulate.py`, which
-uses fakes and needs neither) has to run where that package resolves. It's already
-editable-installed inside so100-hackathon's own pixi environment, so the simplest way is to run
-from there with this repo's `src/` also on `PYTHONPATH`:
+uses fakes and needs neither) has to run where that package resolves. The package is
+editable-installed inside the vendored copy's own pixi environment (`third_party/so100-hackathon`),
+so the simplest way is to run from there with this repo's `src/` also on `PYTHONPATH`. From the
+repo root:
 
 ```bash
-export PYTHONPATH=/absolute/path/to/embodiedmetalhack/src
-cd /absolute/path/to/so100-hackathon
-pixi run python /absolute/path/to/embodiedmetalhack/run.py "Build a house with ..." \
-    --config /absolute/path/to/embodiedmetalhack/config.yaml
+export REPO=$(pwd)
+export PYTHONPATH=$REPO/src
+cd third_party/so100-hackathon
+pixi install                      # one-time: builds the vendored env
+pixi run python "$REPO/run.py" "Build a house with ..." \
+    --config "$REPO/config.yaml"
 ```
 
 ### Quick start
@@ -472,6 +484,19 @@ Pick up the red triangle block and stack it on the second yellow block.
 Pick up the blue triangle block and stack it on the second green block.
 Pick up the blue triangle block and stack it on the second yellow block.
 ```
+
+## Credits
+
+The SO-100 driver stack, Modal deployment/fine-tuning scripts, and calibration tooling under
+`third_party/so100-hackathon/` are vendored from the **so100-hackathon** project by
+[Rerun.io](https://rerun.io) / [mission-robotics-ai](https://github.com/mission-robotics-ai/so100-hackathon).
+That code is used here under its original **MIT / Apache-2.0** dual license — see
+`third_party/so100-hackathon/LICENSE-MIT` and `third_party/so100-hackathon/LICENSE-APACHE`, and its
+own `README.md` for full usage. Only the source is vendored; the multi-GB `recordings/`,
+`datasets/`, and `.pixi/` environment are excluded and regenerated locally (`pixi install`).
+
+All credit for that stack goes to the original authors; this repo (the SO-101 house-builder
+harness) is a separate layer built on top of it.
 
 Keep `Door blocks | Wall blocks | Roof blocks` grouping, but vary color order and valid positions
 within each group. Record synchronized `cam0`, `cam1`, joint state, actions, gripper state,

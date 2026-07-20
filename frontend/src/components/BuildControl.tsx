@@ -10,9 +10,14 @@ const VOICE_COMMANDS = [
   { id: 'start', label: 'Start', hint: 'Build door layer' },
   { id: 'build wall', label: 'Build Wall', hint: 'After door' },
   { id: 'build roof', label: 'Build Roof', hint: 'After wall' },
+  { id: 'pause', label: 'Proceed to Next Task', hint: 'Pause the running task (no verification) — then reset the scene by hand and click the next layer' },
   { id: 'retry last step', label: 'Retry Last Step', hint: 'After a failure' },
   { id: 'stop', label: 'Stop', hint: 'Safe disconnect' },
 ] as const
+
+// Clickable even while a task is running (the task loop occupies the worker; these
+// signal it out-of-band). Everything else is disabled mid-task.
+const ALWAYS_ENABLED = new Set(['stop', 'pause'])
 
 export function BuildControl({ status }: { status: BuildStatus }) {
   const [mode, setMode] = useState<'sentence' | 'structured'>('sentence')
@@ -141,9 +146,9 @@ export function BuildControl({ status }: { status: BuildStatus }) {
           <button
             key={item.id}
             onClick={() => runCommand(item.id)}
-            disabled={busy && item.id !== 'stop'}
+            disabled={busy && !ALWAYS_ENABLED.has(item.id)}
             title={item.hint}
-            className={item.id === 'stop' ? 'danger' : undefined}
+            className={item.id === 'stop' ? 'danger' : item.id === 'pause' ? 'primary' : undefined}
           >
             {item.label}
           </button>

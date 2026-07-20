@@ -11,8 +11,10 @@ robot:
   # replay_episode.py/deploy_policy.py use all session) -- set explicitly only if multiple
   # calibrated followers are ever plugged in at once.
   port: null
-  # Absolute path: run.py's cwd may not be so100-hackathon's repo root.
-  calibration_dir: /Users/jaidev/Desktop/so100-hackathon/calibrations
+  # Calibrations now live in the vendored copy under third_party/. Absolute path is
+  # safest since run.py's cwd may not be this repo root; adjust the prefix if you
+  # moved the repo. (Relative also works when run from the repo root.)
+  calibration_dir: /Users/jaidev/Desktop/GIT-Projects/embodiedmetalhack/third_party/so100-hackathon/calibrations
   # [0,0,0,0,0,0] calibrated = each arm joint at its calibration "middle" pose, gripper
   # closed (0% = closed for LINEAR calib_mode) -- this repo's own calibration convention
   # makes the all-zero pose a real, safe home position already, not a placeholder.
@@ -21,12 +23,12 @@ robot:
   # true: torque never enables, no goal is ever written to the bus -- only logged.
   # This is brand-new, never-run integration code -- flip to false only after watching a
   # dry run look sane (small, smooth logged deltas, not wild jumps).
-  dry_run: true
+  dry_run: false
 
 policy:
   # The deployed /act endpoint (see so100-hackathon's tools/apps/policy_server_modal_molmoact2.py
   # or the finetune variant). Swap this to point at a different checkpoint's deployment.
-  server: https://jaidevtrumpet--so100-molmoact2-serve-finetune-molmoact2f-649c1d.modal.run
+  server: https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run
   fps: 30.0
   execute_steps: 24
   jpeg_quality: 85

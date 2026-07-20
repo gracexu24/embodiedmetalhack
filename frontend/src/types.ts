@@ -50,14 +50,30 @@ export interface ResultEvent {
   result: BuildResult
 }
 
-export type BuildEvent = StatusEvent | TransitionEvent | ResultEvent
-
 export interface Highlight {
   step: number
-  kind: 'verification' | 'instruction'
+  kind: 'verification' | 'instruction' | 'completed'
   label: string
   thumbnail_base64: string | null
 }
+
+export interface HighlightEvent {
+  type: 'highlight'
+  run_id: string | null
+  highlight: Highlight
+}
+
+export interface HighlightsResetEvent {
+  type: 'highlights_reset'
+  run_id: string | null
+}
+
+export type BuildEvent =
+  | StatusEvent
+  | TransitionEvent
+  | ResultEvent
+  | HighlightEvent
+  | HighlightsResetEvent
 
 export interface DetectedColors {
   door: Color

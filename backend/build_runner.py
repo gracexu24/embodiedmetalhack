@@ -8,12 +8,14 @@ retry_last_step, and stop.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import cv2
 import rerun as rr
 
 from house_builder.builder import HouseBuilder
@@ -59,6 +61,9 @@ class BuildRunner:
         self.failed_layer: str | None = None
         self._builder: HouseBuilder | None = None
         self._busy = False
+        # Live highlights for the current run (kind/label/thumbnail), accumulated as the
+        # build emits them and replayed to any newly-subscribing WebSocket client.
+        self._highlights: list[dict[str, Any]] = []
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +71,9 @@ class BuildRunner:
     def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         queue.put_nowait(self.status_event())
+        # Replay the current run's highlights so a fresh/reconnecting client rebuilds the reel.
+        for highlight in self._highlights:
+            queue.put_nowait({"type": "highlight", "run_id": self.run_id, "highlight": highlight})
         self._subscribers.add(queue)
         return queue
 
@@ -107,6 +115,25 @@ class BuildRunner:
         self._broadcast({"type": "transition", "run_id": self.run_id, **entry})
         self._broadcast(self.status_event())
 
+    def _on_highlight(self, kind: str, label: str, frame: Any) -> None:
+        """Encode a live highlight (build thread) and fan it out to WebSocket clients."""
+        thumbnail_base64: str | None = None
+        if frame is not None:
+            try:
+                ok, encoded = cv2.imencode(".jpg", frame)  # frame is BGR from the verifier
+                if ok:
+                    thumbnail_base64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+            except Exception:
+                log.warning("Failed to encode highlight thumbnail", exc_info=True)
+        highlight = {
+            "kind": kind,
+            "label": label,
+            "thumbnail_base64": thumbnail_base64,
+            "step": len(self._highlights),
+        }
+        self._highlights.append(highlight)
+        self._broadcast({"type": "highlight", "run_id": self.run_id, "highlight": highlight})
+
     def set_request(self, request: HouseRequest) -> dict[str, Any]:
         """Store a house request from Build this / reference scan (no robot motion)."""
         with self._lock:
@@ -122,11 +149,15 @@ class BuildRunner:
             self.result = None
             self.failed_layer = None
             self.completed_layers = []
+            self._highlights = []  # new build request -> fresh highlights reel
             if self.run_id is None:
                 self.run_id = uuid.uuid4().hex[:12]
                 self.history = []
                 self.state = BuildState.IDLE.value
         print(f"[ui] request stored (run {self.run_id}): {self.request_sentence}", flush=True)
+        # Tell clients to clear the reel even when run_id is unchanged (a second house
+        # reuses the same run_id, so a run_id-change reset alone wouldn't fire).
+        self._broadcast({"type": "highlights_reset", "run_id": self.run_id})
         self._broadcast(self.status_event())
         return {
             "run_id": self.run_id,
@@ -150,11 +181,26 @@ class BuildRunner:
             "retry the last step": "retry_last_step",
             "retry": "retry_last_step",
             "stop": "stop",
+            "pause": "pause",
+            "proceed": "pause",
+            "proceed to next task": "pause",
+            "next": "pause",
         }
         action = aliases.get(normalized)
         if action is None:
             print(f"[ui] rejected unknown command: {command!r}", flush=True)
             return {"error": f"Unknown command: {command}"}
+
+        # Pause must NOT go through the executor: the continuous task loop is occupying the
+        # single worker, so a queued pause would never run. _builder.pause() just sets a
+        # thread-safe Event, so signal it directly here -- the running loop stops after its
+        # current policy chunk, its build_layer returns, and _busy clears on its own.
+        if action == "pause":
+            if self._builder is not None:
+                self._builder.pause()
+                print("[ui] pause signaled -- current task will stop after its chunk", flush=True)
+            self._broadcast(self.status_event())
+            return {"accepted": True, "command": "pause"}
 
         print(
             f"[ui] command {action!r} received "
@@ -169,6 +215,13 @@ class BuildRunner:
             self._loop = asyncio.get_running_loop()
             if action == "stop":
                 self._busy = False
+                # Break the running task loop out-of-band first: the single build worker is
+                # busy in policy.run_instruction, so a queued _stop would never run until
+                # the loop ends. request_stop() sets a flag the loop checks between chunks,
+                # freeing the worker so the submitted _stop (close: torque off + disconnect)
+                # can execute. Mirrors how pause is handled above.
+                if self._builder is not None:
+                    self._builder.request_stop()
                 self._executor.submit(self._stop)
                 return {"accepted": True, "command": "stop"}
             self._busy = True
@@ -210,6 +263,7 @@ class BuildRunner:
                 float(self.config["policy"]["skill_duration_seconds"]),
                 float(self.config["policy"].get("check_interval_seconds", 3.0)),
                 on_state_change=self._on_state_change,
+                on_highlight=self._on_highlight,
             )
             self._builder.prepare(self.request)
         return self._builder
@@ -305,6 +359,7 @@ class BuildRunner:
                 float(self.config["policy"]["skill_duration_seconds"]),
                 float(self.config["policy"].get("check_interval_seconds", 3.0)),
                 on_state_change=self._on_state_change,
+                on_highlight=self._on_highlight,
             )
             self._builder = builder
             result = builder.build(self.request)
@@ -342,6 +397,24 @@ class BuildRunner:
             }
             self._broadcast({"type": "result", "run_id": self.run_id, "result": self.result})
             self._broadcast(self.status_event())
+
+    def shutdown(self) -> None:
+        """Release the robot on server shutdown so torque doesn't stay energized.
+
+        Runs on graceful shutdown (Ctrl-C / SIGTERM -> uvicorn runs the lifespan teardown).
+        A SIGKILL (kill -9) cannot be trapped, so it still skips this -- prefer Ctrl-C.
+        """
+        builder = self._builder
+        if builder is not None:
+            builder.request_stop()  # break any running policy loop so the worker frees
+            try:
+                builder.close()  # set_torque(False) + disconnect
+                print("[ui] shutdown: robot disconnected, torque released", flush=True)
+            except Exception as exc:  # noqa: BLE001 -- best-effort safety net
+                log.warning("shutdown: robot close failed: %s", exc)
+            finally:
+                self._builder = None
+        self._executor.shutdown(wait=False)
 
     def detect_from_frame(self, frame: Any) -> HouseRequest:
         if not self.config.get("features", {}).get("human_builder", True):

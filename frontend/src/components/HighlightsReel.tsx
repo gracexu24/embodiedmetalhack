@@ -1,40 +1,16 @@
-import { useEffect, useState } from 'react'
 import type { BuildStatus } from '../hooks/useBuildStatus'
-import type { Highlight } from '../types'
-
-const TERMINAL_STATES = new Set(['completed', 'failed'])
 
 export function HighlightsReel({ status }: { status: BuildStatus }) {
-  const [highlights, setHighlights] = useState<Highlight[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!status.runId || !TERMINAL_STATES.has(status.state)) return
-
-    let cancelled = false
-    fetch(`/api/highlights/${status.runId}`)
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return response.json() as Promise<Highlight[]>
-      })
-      .then((data) => {
-        if (!cancelled) setHighlights(data)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [status.runId, status.state])
+  const highlights = status.highlights
 
   return (
-    <section className="panel panel-wide">
+    <section className="panel">
       <h2>Highlights Reel</h2>
-      {error && <p className="error">Could not load highlights: {error}</p>}
+      <p className="panel-subtitle">
+        Key moments stream in live as each layer starts and is placed.
+      </p>
       {highlights.length === 0 ? (
-        <p className="panel-subtitle">Highlights appear here once a build finishes.</p>
+        <p className="panel-subtitle">Highlights appear here as the build runs.</p>
       ) : (
         <div className="highlights-strip">
           {highlights.map((highlight, index) => (

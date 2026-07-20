@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -25,6 +27,8 @@ import cv2
 import numpy as np
 
 from .robot import Robot
+
+log = logging.getLogger(__name__)
 
 # cam0 = overhead camera, cam1 = side camera -- matches so100-hackathon's own convention
 # (deploy_policy.py's --camera-names default, and camera 0/1 detection order all session).
@@ -37,7 +41,12 @@ class Policy:
     def load(self) -> None:
         raise NotImplementedError
 
-    def run_instruction(self, instruction: str, duration_seconds: float) -> bool:
+    def run_instruction(
+        self,
+        instruction: str,
+        duration_seconds: float,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> bool:
         raise NotImplementedError
 
 
@@ -69,19 +78,43 @@ class MolmoAct2Policy(Policy):
 
     def load(self) -> None:
         """No local model to load -- inference runs on Modal. A GET (not POST) so this
-        doesn't trigger a real inference call or wait through a cold start; it only
-        proves the endpoint exists and routes, so a typo'd URL fails fast instead of
-        mid-skill."""
+        doesn't trigger a real inference call; it only tries to prove the endpoint exists
+        and routes, so a typo'd URL fails fast instead of mid-skill.
+
+        The /act endpoint is POST-only and can be cold (Modal scales to zero), so a GET
+        may hang past the timeout even though the server is perfectly healthy for the real
+        POST in _query_actions. A read timeout therefore means "reachable but slow", not
+        "misconfigured" -- we log and proceed, letting the real POST (180s timeout) absorb
+        any cold start. Only a genuine connection failure (bad host, refused) hard-fails.
+        """
         try:
             urllib.request.urlopen(self.server, timeout=10)
         except urllib.error.HTTPError:
             pass  # any HTTP response (even 404/405) proves the endpoint is reachable
+        except (TimeoutError, socket.timeout):
+            log.warning(
+                "Policy server %s did not answer a GET within 10s (expected for a "
+                "POST-only or cold-starting /act endpoint); proceeding.",
+                self.server,
+            )
         except urllib.error.URLError as exc:
+            # A URLError wrapping a timeout is still just "slow", not misconfigured.
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                log.warning(
+                    "Policy server %s timed out on the reachability GET; proceeding.",
+                    self.server,
+                )
+                return
             raise RuntimeError(
                 f"Cannot reach the Modal policy server at {self.server}: {exc}"
             ) from exc
 
-    def run_instruction(self, instruction: str, duration_seconds: float) -> bool:
+    def run_instruction(
+        self,
+        instruction: str,
+        duration_seconds: float,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> bool:
         """Run the policy loop for duration_seconds and return True on a clean finish.
 
         The return value is NOT a task-success signal -- MolmoAct2 has no built-in
@@ -90,6 +123,10 @@ class MolmoAct2Policy(Policy):
         error (server unreachable, malformed response); it says nothing about whether the
         skill actually worked. HouseBuilder treats the camera verifier as the only source
         of ground truth about placement -- see _run_until_verified in builder.py.
+
+        should_stop, if given, is polled between action ticks (and before each new
+        inference request) so pause/stop take effect within one tick instead of only at
+        the end of the chunk -- this is what makes the Stop button feel immediate.
         """
         if duration_seconds <= 0:
             raise ValueError("Skill duration must be positive.")
@@ -97,6 +134,8 @@ class MolmoAct2Policy(Policy):
         period = 1.0 / self.fps
         started = time.monotonic()
         while time.monotonic() - started < duration_seconds:
+            if should_stop is not None and should_stop():
+                break
             state = list(self.robot.get_observation()["joint_state"])
             images = self.camera_observations()
             chunk = self._query_actions(instruction, state, images)
@@ -105,6 +144,8 @@ class MolmoAct2Policy(Policy):
             for action in chunk[: self.execute_steps]:
                 if time.monotonic() - started >= duration_seconds:
                     break
+                if should_stop is not None and should_stop():
+                    return True
                 sleep_s = next_tick - time.monotonic()
                 if sleep_s > 0:
                     time.sleep(sleep_s)
