@@ -24,10 +24,10 @@ vendored [so100-hackathon](https://github.com/jaidevshriram/so100-hackathon)
   <em>SO-101 follower, overhead (cam0) + side (cam1), colored blocks on the build mat.</em>
 </p>
 
-| Demo | File |
-| ---- | ---- |
-| House / stacking run | [demo_build.mp4](assets/demos/demo_build.mp4) |
-| Single policy rollout | [demo_policy.mp4](assets/demos/demo_policy.mp4) |
+Stacking demos (both clips):
+
+- [demo_build.mp4](assets/demos/demo_build.mp4)
+- [demo_policy.mp4](assets/demos/demo_policy.mp4)
 
 <video src="assets/demos/demo_build.mp4" controls width="720"></video>
 <video src="assets/demos/demo_policy.mp4" controls width="720"></video>
@@ -78,7 +78,7 @@ On Pause, torque is released for a hand reset; the next layer re-enables torque.
 
 ```text
 embodiedmetalhack/
-├── run.py / voice_control.py / human_builder.py / human_builder_ui.py
+├── run.py / voice_control.py
 ├── simulate.py / disarm.py / release_torque.py
 ├── config.yaml  requirements.txt  pyproject.toml
 ├── assets/demos/          # workspace photo + demo videos
@@ -92,13 +92,13 @@ embodiedmetalhack/
 
 ## Setup
 
-Sections 1–3: tests / offline. 4–8: real arm.
+Sections 1–3: tests / offline. 4–7: real arm.
 
 ### 1. Prerequisites
 
 - Python 3.11+
 - SO-101 follower on serial (for real builds)
-- Cameras: overhead `cam0`, side `cam1`, optional model-house `camera3`
+- Cameras: overhead `cam0`, side `cam1`
 - Vendored driver: `cd third_party/so100-hackathon && pixi install` (once, for hardware)
 - No local GPU — policies are Modal HTTP endpoints
 - Voice mic: `brew install portaudio` or `sudo apt-get install portaudio19-dev`
@@ -150,35 +150,24 @@ Servers are defined under `third_party/so100-hackathon/tools/apps/`.
 | ------ | ---- | ------ |
 | `cam0` | policy observation (overhead / top) | `cameras.cam0` |
 | `cam1` | policy observation (side); optional HSV verify | `cameras.cam1` |
-| `camera3` | human model-house scan | `cameras.camera3` |
 
 Defaults: 640×480 @ 30 FPS — set OS capture `index` values.
 
 ```yaml
 features:
   camera_verification: false  # HSV verifier; build loop is operator-paced by default
-  human_builder: true         # false → UI sentence/color inputs only
 ```
 
-With `human_builder: false`, dashboard sentence or color pickers still produce  
+Prepare builds from a typed sentence or the dashboard color pickers — both produce  
 `Build a house with a <door> door, <wall> walls, and a <roof> roof.`
 
 **Optional cam1 verification:** when enabled, segments red/yellow/blue/green in calibrated
 height bands (no ArUco). Wall/roof also check the support color below. Color-only vision
-confirms color in band, not physical shape identity.
+confirms color in band, not physical shape identity. After cameras are fixed, set
+`verification.height_regions` (`min_y`/`max_y`; Y grows downward — door largest Y, roof
+smallest) and related thresholds in `config.yaml`.
 
-### 7. Calibrate vision (camera3 / verification)
-
-After cameras and jig are fixed:
-
-1. Build a correct reference stack.
-2. Capture stills (`python human_builder.py --image saved.jpg` for camera3).
-3. Set `min_y`/`max_y` (and `min_x`/`max_x` for human_builder). Y grows downward — door largest
-   Y, roof smallest.
-4. Tune `human_builder.hsv_ranges` for your lighting (yellow under a cool cast often sits near
-   hue ~14–19 on this camera).
-
-### 8. Hardware Python path
+### 7. Hardware Python path
 
 `robot.py` imports `so100_hackathon` from the vendored tree. Real arm motion needs that pixi
 env + this repo on `PYTHONPATH` (`simulate.py` and tests do not):
@@ -195,11 +184,8 @@ pixi run python "$REPO/run.py" "Build a house with a red door, yellow walls, and
 ```bash
 python simulate.py                                                              # offline fakes
 python run.py "Build a house with a red door, yellow walls, and a blue roof."   # needs pixi
-python run.py "$(python human_builder.py --image model_house.jpg)"
 python voice_control.py            # mic (needs network for Google recognizer)
 python voice_control.py --text
-PYTHONPATH=src:. python human_builder_ui.py --camera-index 0 --port 8765
-# → http://127.0.0.1:8765  (laptop preview + Detect; rejects missing/ambiguous colors)
 ```
 
 **Dashboard**
@@ -209,12 +195,11 @@ uvicorn backend.main:app --reload --port 8000          # terminal 1
 cd frontend && npm install && npm run dev              # terminal 2 → :5173
 ```
 
-Buttons mirror voice. Reference scan uses `camera3`. Live monitoring uses the embedded Rerun
-viewer.
+Buttons mirror voice. Live monitoring uses the embedded Rerun viewer.
 
 | Command | Effect |
 | ------- | ------ |
-| `Build this` | Scan camera3 (if enabled); store request; arm idle |
+| `Build this` | Store the typed / color-picked request; arm idle |
 | `start` | Connect / load policy; run door until Pause |
 | `build wall` / `build roof` | Run that layer until Pause |
 | `Pause` (UI) | Stop policy loop; release torque for hand reset |
@@ -375,14 +360,6 @@ Companion: [sheanrahman192/hackathonjustACT](https://github.com/sheanrahman192/h
 | MolmoAct2 AE checkpoint | https://huggingface.co/JaidevShriram/molmoact2-jags-ae |
 
 Serve URLs are listed under [Inference](#inference).
-
-## Safety
-
-Research harness, not a certified safety controller. Physical E-stop, guarding, independent
-motion limits, low initial speed. Keep people clear while torque is enabled. Prefer
-`dry_run: true` until logged deltas look sane. Test stop / home / disconnect / joint order /
-action scaling before rollouts. Use `release_torque.py` / `disarm.py` if a crash leaves the arm
-energized.
 
 ## Credits
 
