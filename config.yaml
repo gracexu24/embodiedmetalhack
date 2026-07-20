@@ -54,13 +54,32 @@ cameras:
     fps: 30
 
 human_builder:
-  # EXAMPLE CAMERA3 BANDS: calibrate for the model-house camera.
-  min_color_occupancy: 0.01
-  min_color_margin: 0.005
+  # Calibrated from the 640x480 sample camera view. The center crop excludes
+  # blue screens/background objects at the image edges.
+  min_color_occupancy: 0.05
+  min_color_margin: 0.05
+  # ROIs below are in pixels at this reference resolution; other frame sizes scale.
+  calibration_width: 640
+  calibration_height: 480
   height_regions:
-    door: {min_y: 300, max_y: 380}
-    wall: {min_y: 220, max_y: 300}
-    roof: {min_y: 140, max_y: 220}
+    # The model's arched door is the bottom shape.
+    door: {min_x: 150, max_x: 480, min_y: 350, max_y: 465}
+    # The model's wall block is the middle shape.
+    wall: {min_x: 150, max_x: 480, min_y: 215, max_y: 335}
+    roof: {min_x: 150, max_x: 480, min_y: 125, max_y: 205}
+  # Camera3-specific ranges compensate for the sample camera's cool color cast:
+  # the green block appears near hue 95 while the blue block is near hue 110.
+  hsv_ranges:
+    red:
+      - {lower: [0, 90, 50], upper: [12, 255, 255]}
+      - {lower: [165, 80, 40], upper: [179, 255, 255]}
+    # The yellow block reads at hue ~14-19 under this camera's cool cast.
+    yellow:
+      - {lower: [13, 60, 50], upper: [35, 255, 255]}
+    green:
+      - {lower: [45, 45, 35], upper: [104, 255, 255]}
+    blue:
+      - {lower: [105, 65, 40], upper: [140, 255, 255]}
 
 verification:
   # EXAMPLE CAM1 PIXEL VALUES: calibrate for the installed side camera.

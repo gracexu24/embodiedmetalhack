@@ -24,9 +24,20 @@ def detect_model_house(
     print(f"[calib] camera3 frame: {width}x{height}", flush=True)
     detected: dict[Layer, Color] = {}
     for layer in Layer:
-        region = verification_config["height_regions"][layer.value]
+        region = _scale_region(
+            verification_config["height_regions"][layer.value],
+            width,
+            height,
+            int(verification_config.get("calibration_width", width)),
+            int(verification_config.get("calibration_height", height)),
+        )
         scores = {
-            color: _color_occupancy(frame, color, region)
+            color: _color_occupancy(
+                frame,
+                color,
+                region,
+                verification_config.get("hsv_ranges", {}),
+            )
             for color in ALLOWED_COLORS[layer]
         }
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
@@ -35,7 +46,9 @@ def detect_model_house(
         margin = float(verification_config.get("min_color_margin", 0.005))
         score_text = ", ".join(f"{color.value}={score:.4f}" for color, score in ranked)
         print(
-            f"[calib] {layer.value} band y={region['min_y']}..{region['max_y']}: "
+            f"[calib] {layer.value} ROI "
+            f"x={region.get('min_x', 0)}..{region.get('max_x', width)}, "
+            f"y={region['min_y']}..{region['max_y']}: "
             f"{score_text} (min_occupancy={minimum}, min_margin={margin})",
             flush=True,
         )
@@ -55,6 +68,24 @@ def detect_model_house(
     )
 
 
+def _scale_region(
+    region: dict[str, int],
+    frame_width: int,
+    frame_height: int,
+    calibration_width: int,
+    calibration_height: int,
+) -> dict[str, int]:
+    """Scale a calibrated ROI to the actual input resolution."""
+    x_scale = frame_width / calibration_width
+    y_scale = frame_height / calibration_height
+    return {
+        "min_x": round(region.get("min_x", 0) * x_scale),
+        "max_x": round(region.get("max_x", calibration_width) * x_scale),
+        "min_y": round(region["min_y"] * y_scale),
+        "max_y": round(region["max_y"] * y_scale),
+    }
+
+
 def request_to_sentence(request: HouseRequest) -> str:
     """Format a detected model as input accepted by run.py."""
     return (
@@ -67,16 +98,25 @@ def _color_occupancy(
     frame: np.ndarray,
     color: Color,
     region: dict[str, int],
+    configured_ranges: dict[str, Any] | None = None,
 ) -> float:
+    min_x = max(0, int(region.get("min_x", 0)))
+    max_x = min(frame.shape[1], int(region.get("max_x", frame.shape[1])))
     min_y = max(0, int(region["min_y"]))
     max_y = min(frame.shape[0], int(region["max_y"]))
-    if min_y >= max_y:
+    if min_x >= max_x or min_y >= max_y:
         raise ValueError(f"Invalid height region: {region}")
 
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    cropped = hsv[min_y:max_y, :]
+    cropped = hsv[min_y:max_y, min_x:max_x]
     mask = np.zeros(cropped.shape[:2], dtype=np.uint8)
-    for lower, upper in COLOR_HSV_RANGES[color]:
+    raw_ranges = (configured_ranges or {}).get(color.value)
+    ranges = (
+        [(tuple(item["lower"]), tuple(item["upper"])) for item in raw_ranges]
+        if raw_ranges
+        else COLOR_HSV_RANGES[color]
+    )
+    for lower, upper in ranges:
         mask = cv2.bitwise_or(
             mask,
             cv2.inRange(cropped, np.asarray(lower), np.asarray(upper)),
