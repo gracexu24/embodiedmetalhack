@@ -1,19 +1,19 @@
-# SO-101 Rob the Builder, Robot Builder 
+# SO-101 Rob the Builder
 
 <p align="center">
   <img src="assets/block_house.png" alt="Three-block house: door, wall, and roof" width="420">
 </p>
 
-A Python harness that turns one natural-language house request into short pick-and-place
-skills for a [Seeed Studio SO-101](https://www.seeedstudio.com/) arm. It parses three colors,
-plans three layers, and runs each instruction through a Modal-hosted policy (MolmoAct2, ACT, or
-related servers). The policy runs until you pause from the UI /
-voice controller (or a verification ran off of a camera), then you reset the scene by hand and continue to the next layer.
+Natural-language house building for a [Seeed Studio SO-101](https://www.seeedstudio.com/) arm:
+parse three layer colors → plan three pick-and-place skills → run them on a Modal-hosted policy
+(MolmoAct2, ACT, …). Builds are **operator-paced** — the policy runs until you **Pause** (UI /
+voice), then you reset the scene by hand and continue. Optional cam1 HSV verification can be
+enabled in config; by default Pause is the done signal. No auto-home (policy starts from the
+current pose).
 
-This repo is the house-building control layer. Robot drivers, calibration, and Modal deploy /
-train scripts live in the vendored
-[so100-hackathon](https://github.com/jaidevshriram/so100-hackathon) stack under
-`third_party/so100-hackathon/` (upstream also:
+This repo is the control layer. Drivers, calibration, and Modal train/serve scripts live in
+vendored [so100-hackathon](https://github.com/jaidevshriram/so100-hackathon)
+(`third_party/so100-hackathon/`; upstream also
 [mission-robotics-ai/so100-hackathon](https://github.com/mission-robotics-ai/so100-hackathon)).
 
 ## Demo
@@ -21,193 +21,106 @@ train scripts live in the vendored
 <p align="center">
   <img src="assets/demos/workspace_setup.png" alt="SO-101 workspace with overhead and side cameras" width="720">
   <br>
-  <em>Workspace: SO-101 follower, overhead (cam0) + side (cam1) cameras, colored blocks on the build mat.</em>
+  <em>SO-101 follower, overhead (cam0) + side (cam1), colored blocks on the build mat.</em>
 </p>
 
-**House layer build run** (stacking):
-
-https://github.com/gracexu24/embodiedmetalhack/raw/main/assets/demos/demo_build.mp4
+| Demo | File |
+| ---- | ---- |
+| House / stacking run | [demo_build.mp4](assets/demos/demo_build.mp4) |
+| Single policy rollout | [demo_policy.mp4](assets/demos/demo_policy.mp4) |
 
 <video src="assets/demos/demo_build.mp4" controls width="720"></video>
-
-
-https://github.com/gracexu24/embodiedmetalhack/raw/main/assets/demos/demo_policy.mp4
-
 <video src="assets/demos/demo_policy.mp4" controls width="720"></video>
 
-If the embedded players do not render in your viewer, open the files under
-[`assets/demos/`](assets/demos/).
+## Task
 
-## House and physical layout
-
-Every house is exactly `door` (bottom), `wall` (middle), and `roof` (top). Colors are restricted
-by layer:
-
-| Layer | Allowed colors |
-| ----- | -------------- |
-| door  | red or blue    |
-| wall  | yellow or green |
-| roof  | red or blue    |
+| Layer | Position | Colors |
+| ----- | -------- | ------ |
+| door  | bottom   | red, blue |
+| wall  | middle   | yellow, green |
+| roof  | top      | red, blue |
 
 ```text
 Door blocks          Wall blocks            Roof blocks
 Red door  Blue door | Yellow wall  Green wall | Red roof  Blue roof
 ```
 
-Color order within each group can vary so the policy learns block identity, not one fixed
-coordinate.
+Vary color order within each group so the policy learns identity, not one fixed coordinate.
 
-## Example requests
+**Example request → planner skills**
 
 ```text
 Build a house with a red door, yellow walls, and a blue roof.
-Make the door blue, the walls green, and the roof red.
-I want a blue roof with green walls and a red door.
-Create a blue-door, yellow-wall, red-roof house.
+→ Pick up the red block and place it on the black rectangle.
+→ Pick up the yellow block and stack it on the first red block.
+→ Pick up the blue triangle block and stack it on the second yellow block.
 ```
 
-Parsing is deterministic, case-insensitive, and punctuation-tolerant. It accepts `wall` /
-`walls` and either `red door` or `door red`. Missing, conflicting, or unsupported colors are
-errors.
-
-For a request like `red door, yellow walls, blue roof`, the planner emits:
+Other accepted phrasings (deterministic, case-insensitive):  
+`Make the door blue, the walls green, and the roof red.` ·  
+`I want a blue roof with green walls and a red door.` ·  
+`Create a blue-door, yellow-wall, red-roof house.`  
+Accepts `wall`/`walls` and `red door` or `door red`. Missing, conflicting, or unsupported colors
+are errors.
 
 ```text
-Pick up the red block and place it on the black rectangle.
-Pick up the yellow block and stack it on the first red block.
-Pick up the blue triangle block and stack it on the second yellow block.
+request → parser → planner → state machine
+  door ──Pause──► wall ──Pause──► roof → COMPLETED
+                    └── FAILED → retry after hand reset
+
+IDLE → CONNECTING → EXECUTING ⇄ Pause / next layer → COMPLETED
+                         └→ FAILED → retry last step
 ```
 
-## Architecture
+On Pause, torque is released for a hand reset; the next layer re-enables torque.
 
-```text
-"Red door, green walls, blue roof"
-                 ↓
-          Sentence parser
-                 ↓
-     [red door, green wall, blue roof]
-                 ↓
-         Three-step planner
-                 ↓
-      Small build state machine
-                 ↓
-       Pick and place door  →  operator Pause
-                 ↓
-       Pick and stack wall  →  operator Pause
-                 ↓
-       Pick and stack roof  →  operator Pause
-                 ↓
-          Completed house
-```
-
-State machine (simplified):
-
-```text
-IDLE → CONNECTING → EXECUTING ⇄ (operator Pause / next layer)
-                         ↓
-                    COMPLETED
-                         ↓
-                      FAILED  →  retry last step (after human reset)
-```
-
-There is **no automatic home** at session start (the policy runs from the arm's current pose,
-matching `deploy_policy.py`). There is **no automatic cam1 success gate** in the build loop by
-default: MolmoAct2 never reports "task done", so the operator decides when a layer is finished
-via **Pause**. Optional `features.camera_verification` still configures the HSV verifier for
-experiments, but the current operator-paced path does not wait on it.
-
-On Pause, torque is released so you can reset blocks by hand. The next layer re-enables torque
-before driving again.
-
-## Repository structure
+## Repository
 
 ```text
 embodiedmetalhack/
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── config.yaml
-├── run.py                   # one-shot CLI build
-├── voice_control.py         # staged voice / text commands
-├── human_builder.py         # camera3 → harness sentence
-├── human_builder_ui.py      # minimal laptop-camera detect UI (:8765)
-├── simulate.py              # offline fake robot/policy loop
-├── disarm.py                # panic: torque OFF on detected arms
-├── release_torque.py        # panic: torque OFF via config.yaml robot
-├── assets/
-│   ├── block_house.png
-│   └── demos/               # workspace photo + demo videos
-├── backend/                 # FastAPI dashboard API (:8000)
-├── frontend/                # React/Vite UI (:5173)
-├── third_party/
-│   └── so100-hackathon/     # vendored SO-100/101 driver + Modal scripts
-├── src/house_builder/
-│   ├── models.py
-│   ├── parser.py
-│   ├── planner.py
-│   ├── robot.py
-│   ├── policy.py
-│   ├── state_machine.py
-│   ├── verifier.py
-│   ├── builder.py
-│   ├── rr_time.py
-│   ├── rr_blueprint.py
-│   └── sync_checkpoint.py
+├── run.py / voice_control.py / human_builder.py / human_builder_ui.py
+├── simulate.py / disarm.py / release_torque.py
+├── config.yaml  requirements.txt  pyproject.toml
+├── assets/demos/          # workspace photo + demo videos
+├── backend/               # FastAPI dashboard (:8000)
+├── frontend/              # React/Vite UI (:5173)
+├── third_party/so100-hackathon/   # Feetech driver, calibrations, Modal apps
+├── src/house_builder/     # models, parser, planner, robot, policy,
+│                          # state_machine, verifier, builder, rr_*, sync_checkpoint
 └── tests/
 ```
 
 ## Setup
 
-Sections 1–3 are enough for tests and parser/planner work. Sections 4–8 are required before
-moving the real arm.
+Sections 1–3: tests / offline. 4–8: real arm.
 
 ### 1. Prerequisites
 
 - Python 3.11+
-- Seeed Studio SO-101 follower on a serial port (for real builds)
-- Cameras: overhead (`cam0`), side (`cam1`), optional model-house (`camera3`)
-- Vendored driver at `third_party/so100-hackathon/` — install its pixi env once for hardware
-  runs (`cd third_party/so100-hackathon && pixi install`)
-- No local GPU needed for inference: policies run on Modal HTTP `/act` endpoints
-- macOS PortAudio for voice: `brew install portaudio`  
-  Debian/Ubuntu: `sudo apt-get install portaudio19-dev`
+- SO-101 follower on serial (for real builds)
+- Cameras: overhead `cam0`, side `cam1`, optional model-house `camera3`
+- Vendored driver: `cd third_party/so100-hackathon && pixi install` (once, for hardware)
+- No local GPU — policies are Modal HTTP endpoints
+- Voice mic: `brew install portaudio` or `sudo apt-get install portaudio19-dev`
 
-### 2. Clone and virtualenv
+### 2–3. Install
 
 ```bash
 git clone https://github.com/gracexu24/embodiedmetalhack.git
 cd embodiedmetalhack
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+python3.11 -m venv .venv && source .venv/bin/activate
+python -m pip install -e ".[dev,voice,web]"   # or: pip install -e .
+pytest && ruff check . && mypy src/house_builder
 ```
 
-### 3. Install this package
-
-```bash
-# Recommended: runtime + tests + voice + dashboard
-python -m pip install -e ".[dev,voice,web]"
-
-# Runtime only
-python -m pip install -e .
-```
-
-| Extra   | Packages |
-| ------- | -------- |
+| Extra | Packages |
+| ----- | -------- |
 | runtime | `numpy`, `opencv-python`, `PyYAML`, `rerun-sdk` |
-| dev     | `pytest`, `ruff`, `mypy` |
-| voice   | `SpeechRecognition`, `PyAudio` |
-| web     | `fastapi`, `uvicorn`, `websockets` |
+| dev | `pytest`, `ruff`, `mypy` |
+| voice | `SpeechRecognition`, `PyAudio` |
+| web | `fastapi`, `uvicorn`, `websockets` |
 
-```bash
-pytest
-ruff check .
-mypy src/house_builder
-```
-
-### 4. Configure the robot
-
-Edit `config.yaml`:
+### 4–5. Robot and policy (`config.yaml`)
 
 ```yaml
 robot:
@@ -215,238 +128,181 @@ robot:
   calibration_dir: third_party/so100-hackathon/calibrations
   home_pose: [0, 0, 0, 0, 0, 0]
   max_step_deg: 10.0
-  dry_run: true                 # start true; flip false only after a sane dry run
-```
+  dry_run: true                 # flip false only after a sane dry run
 
-Validate joint ordering, gripper sense, stop, and home at low speed before policy rollouts.
-
-### 5. Configure the policy endpoint
-
-`MolmoAct2Policy` calls a Modal-hosted HTTP server (see
-`third_party/so100-hackathon/tools/apps/`). Point `policy.server` at the deployment you want:
-
-```yaml
 policy:
   server: https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run
   fps: 30.0
   execute_steps: 24
   jpeg_quality: 85
   skill_duration_seconds: 10
-  check_interval_seconds: 3.0   # chunk length so Pause/Stop are noticed promptly
+  check_interval_seconds: 3.0   # chunk length so Pause/Stop are noticed
 ```
 
-Each call sends the instruction, `cam0`/`cam1` frames (as `top`/`side`), and joint state.
-`policy.load()` is a cheap reachability check, not a cold-start inference call.
+Validate joint order, gripper sense, stop, and home at low speed before policy rollouts.
+Each policy call sends the instruction, `cam0`/`cam1` (as `top`/`side`), and joint state.
+`policy.load()` is a reachability check, not a cold-start inference call.
+Servers are defined under `third_party/so100-hackathon/tools/apps/`.
 
-### 6. Cameras
+### 6. Cameras and features
 
-| Camera    | Role | Config |
-| --------- | ---- | ------ |
-| `cam0`    | policy observation (overhead / top) | `cameras.cam0` |
-| `cam1`    | policy observation (side); optional HSV verification | `cameras.cam1` |
+| Camera | Role | Config |
+| ------ | ---- | ------ |
+| `cam0` | policy observation (overhead / top) | `cameras.cam0` |
+| `cam1` | policy observation (side); optional HSV verify | `cameras.cam1` |
 | `camera3` | human model-house scan | `cameras.camera3` |
 
-Set OS capture `index` values in `config.yaml` (defaults 640×480 @ 30 FPS).
-
-Optional feature flags:
+Defaults: 640×480 @ 30 FPS — set OS capture `index` values.
 
 ```yaml
 features:
-  camera_verification: false  # HSV verifier config; build loop is operator-paced by default
-  human_builder: false        # disable camera3 scan / UI panel; use sentence or color inputs
+  camera_verification: false  # HSV verifier; build loop is operator-paced by default
+  human_builder: true         # false → UI sentence/color inputs only
 ```
 
-With `human_builder: false`, prepare builds from the dashboard sentence or color pickers. Both
-paths produce  
+With `human_builder: false`, dashboard sentence or color pickers still produce  
 `Build a house with a <door> door, <wall> walls, and a <roof> roof.`
 
-### 7. Calibrate vision (if using camera3 / verification)
+**Optional cam1 verification:** when enabled, segments red/yellow/blue/green in calibrated
+height bands (no ArUco). Wall/roof also check the support color below. Color-only vision
+confirms color in band, not physical shape identity.
 
-Pixel bands in `config.yaml` are examples. After cameras and the jig are fixed:
+### 7. Calibrate vision (camera3 / verification)
+
+After cameras and jig are fixed:
 
 1. Build a correct reference stack.
 2. Capture stills (`python human_builder.py --image saved.jpg` for camera3).
-3. Set `min_y` / `max_y` (and `min_x` / `max_x` for human_builder) so bands match each layer.
-   Image Y grows downward: door has the largest Y, roof the smallest.
-
-Also tune `human_builder.hsv_ranges` under your lighting — yellow under a cool cast often sits
-near hue ~14–19 on this camera.
+3. Set `min_y`/`max_y` (and `min_x`/`max_x` for human_builder). Y grows downward — door largest
+   Y, roof smallest.
+4. Tune `human_builder.hsv_ranges` for your lighting (yellow under a cool cast often sits near
+   hue ~14–19 on this camera).
 
 ### 8. Hardware Python path
 
-`robot.py` imports `so100_hackathon` from the vendored tree. For real arm motion, run under
-that pixi env with this repo's `src/` on `PYTHONPATH`:
+`robot.py` imports `so100_hackathon` from the vendored tree. Real arm motion needs that pixi
+env + this repo on `PYTHONPATH` (`simulate.py` and tests do not):
 
 ```bash
-export REPO=$(pwd)
-export PYTHONPATH=$REPO/src
-cd third_party/so100-hackathon
-pixi install   # once
+export REPO=$(pwd) PYTHONPATH=$REPO/src
+cd third_party/so100-hackathon && pixi install   # once
 pixi run python "$REPO/run.py" "Build a house with a red door, yellow walls, and a blue roof." \
   --config "$REPO/config.yaml"
 ```
 
-`simulate.py` and unit tests do **not** need the pixi env.
-
-### Quick start
+## Run
 
 ```bash
-python -m pip install -e ".[dev,voice,web]"
-pytest && ruff check . && mypy src/house_builder
-
-# Offline fake loop (no arm / Modal)
-python simulate.py
-
-# One-shot build (needs PYTHONPATH + pixi as above)
-python run.py "Build a house with a red door, yellow walls, and a blue roof."
-
-# From a model-house image
+python simulate.py                                                              # offline fakes
+python run.py "Build a house with a red door, yellow walls, and a blue roof."   # needs pixi
 python run.py "$(python human_builder.py --image model_house.jpg)"
-
-# Voice or text staged build
-python voice_control.py
+python voice_control.py            # mic (needs network for Google recognizer)
 python voice_control.py --text
-```
-
-## Human-built model input
-
-```bash
-python human_builder.py
-# Build a house with a red door, green walls, and a blue roof.
-
-python human_builder.py --image model_house.jpg
-```
-
-Standalone laptop-camera UI (preview + Detect button):
-
-```bash
 PYTHONPATH=src:. python human_builder_ui.py --camera-index 0 --port 8765
-# open http://127.0.0.1:8765
+# → http://127.0.0.1:8765  (laptop preview + Detect; rejects missing/ambiguous colors)
 ```
 
-The detector rejects missing or ambiguous colors rather than guessing.
-
-## Voice / text staged commands
+**Dashboard**
 
 ```bash
-python voice_control.py          # microphone (needs network for Google recognizer)
-python voice_control.py --text   # type the same commands
+uvicorn backend.main:app --reload --port 8000          # terminal 1
+cd frontend && npm install && npm run dev              # terminal 2 → :5173
 ```
+
+Buttons mirror voice. Reference scan uses `camera3`. Live monitoring uses the embedded Rerun
+viewer.
 
 | Command | Effect |
 | ------- | ------ |
-| `Build this` | Scan camera3 (if enabled), store the build request; arm does not move |
-| `start` | Connect / load policy, run the door layer until Pause |
-| `build wall` | Run the wall layer until Pause |
-| `build roof` | Run the roof layer until Pause, then close when complete |
-| `retry last step` | After a failure + hand reset, re-run that layer (`retry` also works) |
-| `stop` | Abort and disconnect safely |
-| *(UI)* `Pause` | Stop the current policy loop, release torque for a hand reset |
+| `Build this` | Scan camera3 (if enabled); store request; arm idle |
+| `start` | Connect / load policy; run door until Pause |
+| `build wall` / `build roof` | Run that layer until Pause |
+| `Pause` (UI) | Stop policy loop; release torque for hand reset |
+| `retry last step` | After failure + hand reset, re-run that layer (`retry` ok) |
+| `stop` | Abort and disconnect |
 
-## Web dashboard
-
-```bash
-python -m pip install -e ".[dev,voice,web]"
-
-# terminal 1
-uvicorn backend.main:app --reload --port 8000
-
-# terminal 2
-cd frontend && npm install && npm run dev   # http://localhost:5173
-```
-
-Buttons mirror voice: **Build This**, **Start**, **Build Wall**, **Build Roof**, **Pause**,
-**Retry Last Step**, **Stop**. Reference scan uses `camera3`. Live monitoring uses the embedded
-Rerun viewer.
-
-## Panic utilities
-
-If a killed backend leaves servos energized:
+**Panic** (servos left on after a crash):
 
 ```bash
-# Via house_builder robot wrapper + config.yaml
 python release_torque.py
-
-# Or scan all Feetech ports (needs so100_hackathon importable)
-pixi run python "$REPO/disarm.py"   # from third_party/so100-hackathon
-
-# Or ask a still-running backend to stop
+# from third_party/so100-hackathon: pixi run python "$REPO/disarm.py"
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"command":"stop"}' http://localhost:8000/api/build/command
 ```
 
 ## Dataset
 
-Training and evaluation use the LeRobot dataset
-**[JaidevShriram/JAGS_v0_testing](https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing)**
-([dataset card](https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing)):
+[JaidevShriram/JAGS_v0_testing](https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing)
+(Apache-2.0) — LeRobot `so100_follower`:
 
 | Field | Value |
 | ----- | ----- |
-| Robot | `so100_follower` |
-| Episodes / frames (full card) | 253 episodes, 245,934 frames @ 30 FPS |
-| Cameras | `observation.images.top`, `observation.images.side` (720×1280) |
+| Scale | ~253 episodes / 245,934 frames @ 30 FPS (full card) |
+| Cameras | `observation.images.top`, `.side` (720×1280) |
 | Action / state | 6-DoF: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper |
 | Tasks | 10 language-conditioned pick-and-place skills |
-| License | Apache-2.0 |
 
-Related model checkpoint on the Hub:
-[JaidevShriram/molmoact2-jags-ae](https://huggingface.co/JaidevShriram/molmoact2-jags-ae).
+Hub checkpoint: [JaidevShriram/molmoact2-jags-ae](https://huggingface.co/JaidevShriram/molmoact2-jags-ae).
+
+**Fine-tune labels** (same strings the planner emits — keep door \| wall \| roof grouping, vary
+color order; record cam0, cam1, joints, actions, gripper, instruction, success):
+
+```text
+Pick up the red block and place it on the black rectangle.
+Pick up the blue block and place it on the black rectangle.
+
+Pick up the yellow block and stack it on the first red block.
+Pick up the yellow block and stack it on the first blue block.
+Pick up the green block and stack it on the first red block.
+Pick up the green block and stack it on the first blue block.
+
+Pick up the red triangle block and stack it on the second green block.
+Pick up the red triangle block and stack it on the second yellow block.
+Pick up the blue triangle block and stack it on the second green block.
+Pick up the blue triangle block and stack it on the second yellow block.
+```
 
 ## Inference
 
-Inference for this project is almost always **Modal-hosted policy servers** driven from
-[so100-hackathon](https://github.com/jaidevshriram/so100-hackathon) (`pixi run deploy-policy`)
-or from this harness (`config.yaml` → `policy.server`).
-
-### Deployed endpoints used in this project
+Modal-hosted `/act` servers, driven from so100-hackathon (`pixi run deploy-policy`) or this
+harness (`policy.server`).
 
 | Policy | Example task | Server |
 | ------ | ------------ | ------ |
-| **MolmoAct2 LoRA VLM** | Pick up the blue block and place it on the second yellow rectangle | `https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run` |
-| **ACT** | Pick up the red block and place it on the second yellow block | `https://jaidevtrumpet--act-jags-pick-red-block-act.modal.run` |
-| **MolmoAct2 Action Expert** | Pick up the yellow block and place it on the second red block | `https://jaidevtrumpet--molmoact2-jags-ae-act.modal.run` |
+| MolmoAct2 LoRA VLM | Pick up the blue block and place it on the second yellow rectangle | `https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run` |
+| ACT | Pick up the red block and place it on the second yellow block | `https://jaidevtrumpet--act-jags-pick-red-block-act.modal.run` |
+| MolmoAct2 Action Expert | Pick up the yellow block and place it on the second red block | `https://jaidevtrumpet--molmoact2-jags-ae-act.modal.run` |
 | MolmoAct2 SO-101 scale | — | `https://jaidevtrumpet--molmoact2-so101-scale-act.modal.run` |
 | Pi0.5 / SmolVLA API | — | `https://jaidevtrumpet--lerobot-pi05-smolvla-training-trained-policy-api.modal.run` |
 | ACT train predict | — | `https://jaidevtrumpet--so101-act-train-actserver-predict.modal.run` |
 
-From **so100-hackathon** (after `pixi install`):
-
 ```bash
-# MolmoAct2 LoRA
+# From so100-hackathon after pixi install
 pixi run deploy-policy -- \
   --task "Pick up the blue block and place it on the second yellow rectangle" \
   --server https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run
 
-# ACT (shorter chunk size often works better)
 pixi run deploy-policy -- \
   --task "Pick up the red block and place it on the second yellow block" \
   --server https://jaidevtrumpet--act-jags-pick-red-block-act.modal.run \
   --execute-steps 10
 
-# MolmoAct2 Action Expert
 pixi run deploy-policy -- \
   --task "Pick up the yellow block and place it on the second red block" \
   --server https://jaidevtrumpet--molmoact2-jags-ae-act.modal.run
 ```
 
-Point this harness at the same URL:
-
-```yaml
-policy:
-  server: https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run
-```
+| Train job | Policy | Data slice | Steps |
+| --------- | ------ | ---------- | ----- |
+| `molmoact2-jags-ep0` | MolmoAct2 | JAGS, config `episodes: [0]` (1 of 31) | 5,000 |
+| `act_JAGS_v0_testing` (`so101-act-train`) | ACT | all 31 eps / 21,946 frames | 20,000 |
 
 ## Training
 
-Training does **not** live in this harness repo. Use the so100-hackathon / LeRobot / AllenAI
-MolmoAct2 stacks below, then deploy the resulting checkpoint to Modal and set `policy.server`.
+Not in this harness — use so100-hackathon / LeRobot / AllenAI, deploy to Modal, set
+`policy.server`. Prefer base **`allenai/MolmoAct2-SO100_101`** for SO-100/101.
 
-### Recommended MolmoAct2 base for SO-101
-
-Use **`allenai/MolmoAct2-SO100_101`** when fine-tuning MolmoAct2 for SO-100/SO-101.
-
-### Modal LoRA fine-tune (so100-hackathon)
+**Modal LoRA (so100-hackathon)**
 
 ```bash
 GPU_COUNT=2 PYTHONIOENCODING=utf-8 PYTHONUTF8=1 \
@@ -454,10 +310,9 @@ pixi run modal run --detach tools/apps/finetune_modal_molmoact2_lora.py \
   --dataset-repo-id JaidevShriram/JAGS_v0_testing
 ```
 
-Logs example:
-[Modal app `ap-hMXYyB6VFhyMCqMgO1ufuA`](https://modal.com/apps/jaidevtrumpet/main/ap-hMXYyB6VFhyMCqMgO1ufuA?activeTab=logs).
+Logs: [ap-hMXYyB6VFhyMCqMgO1ufuA](https://modal.com/apps/jaidevtrumpet/main/ap-hMXYyB6VFhyMCqMgO1ufuA?activeTab=logs)
 
-### Torchrun / multi-GPU MolmoAct2 recipe (reference)
+**Torchrun / multi-GPU MolmoAct2 (reference)**
 
 ```bash
 export EXP_NAME="molmoact2-my-robot-lora"
@@ -490,100 +345,49 @@ HF_ACCESS_TOKEN="${HF_ACCESS_TOKEN:-}" WANDB_API_KEY="${WANDB_API_KEY:-}" torchr
   --action_expert_learning_rate=5e-5
 ```
 
-Prefer starting from `allenai/MolmoAct2-SO100_101` for this robot family when that checkpoint
-is available in your training entrypoint.
+Start from `allenai/MolmoAct2-SO100_101` when your entrypoint supports it.
 
-### Pi0.5 and SmolVLA (separate B300)
+**Pi0.5 / SmolVLA (separate B300)**
 
 ```bash
 modal run modal_app.py::train \
   --dataset-url "https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing"
 ```
 
-- API: `https://jaidevtrumpet--lerobot-pi05-smolvla-training-trained-policy-api.modal.run`
-- Logs: [Modal app `ap-ldE0fOOUstQbPuHDS2iDOY`](https://modal.com/apps/jaidevtrumpet/main/ap-ldE0fOOUstQbPuHDS2iDOY?activeTab=logs)
+API: `https://jaidevtrumpet--lerobot-pi05-smolvla-training-trained-policy-api.modal.run` ·  
+Logs: [ap-ldE0fOOUstQbPuHDS2iDOY](https://modal.com/apps/jaidevtrumpet/main/ap-ldE0fOOUstQbPuHDS2iDOY?activeTab=logs)
 
-### ACT
+**ACT**
 
-- Predict server: `https://jaidevtrumpet--so101-act-train-actserver-predict.modal.run`
-- Logs: [Modal app `ap-iSSFTN4p717iOvZwSjFnwH`](https://modal.com/apps/jaidevtrumpet/main/ap-iSSFTN4p717iOvZwSjFnwH?activeTab=logs)
-- Companion ACT-focused repo: [sheanrahman192/hackathonjustACT](https://github.com/sheanrahman192/hackathonjustACT)
+Predict: `https://jaidevtrumpet--so101-act-train-actserver-predict.modal.run` ·  
+Logs: [ap-iSSFTN4p717iOvZwSjFnwH](https://modal.com/apps/jaidevtrumpet/main/ap-iSSFTN4p717iOvZwSjFnwH?activeTab=logs) ·  
+Companion: [sheanrahman192/hackathonjustACT](https://github.com/sheanrahman192/hackathonjustACT)
 
-### Fine-tuning language labels (collect / train with these)
+## Links
 
-Keep the same combined instructions the planner emits:
-
-```text
-Pick up the red block and place it on the black rectangle.
-Pick up the blue block and place it on the black rectangle.
-
-Pick up the yellow block and stack it on the first red block.
-Pick up the yellow block and stack it on the first blue block.
-Pick up the green block and stack it on the first red block.
-Pick up the green block and stack it on the first blue block.
-
-Pick up the red triangle block and stack it on the second green block.
-Pick up the red triangle block and stack it on the second yellow block.
-Pick up the blue triangle block and stack it on the second green block.
-Pick up the blue triangle block and stack it on the second yellow block.
-```
-
-Record synchronized `cam0`, `cam1`, joint state, actions, gripper, instruction, and success
-metadata. Keep door | wall | roof grouping, but vary color order within each group.
-
-## Related repositories and experiment links
-
-| Resource | Link |
-| -------- | ---- |
+| Resource | URL |
+| -------- | --- |
 | This harness | https://github.com/gracexu24/embodiedmetalhack |
-| SO-100/101 driver + Modal apps (primary) | https://github.com/jaidevshriram/so100-hackathon |
-| Upstream so100-hackathon (Rerun / mission-robotics) | https://github.com/mission-robotics-ai/so100-hackathon |
-| ACT-focused hackathon fork | https://github.com/sheanrahman192/hackathonjustACT |
+| so100-hackathon (primary) | https://github.com/jaidevshriram/so100-hackathon |
+| Upstream so100-hackathon | https://github.com/mission-robotics-ai/so100-hackathon |
+| ACT fork | https://github.com/sheanrahman192/hackathonjustACT |
 | Dataset | https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing |
-| MolmoAct2 Action Expert checkpoint | https://huggingface.co/JaidevShriram/molmoact2-jags-ae |
-| MolmoAct2 Action Expert serve | https://jaidevtrumpet--molmoact2-jags-ae-act.modal.run |
-| MolmoAct2 LoRA VLM serve | https://jaidevtrumpet--molmoact2-jags-lora-act.modal.run |
-| MolmoAct2 SO-101 scale serve | https://jaidevtrumpet--molmoact2-so101-scale-act.modal.run |
-| Pi0.5 / SmolVLA API | https://jaidevtrumpet--lerobot-pi05-smolvla-training-trained-policy-api.modal.run |
-| ACT predict | https://jaidevtrumpet--so101-act-train-actserver-predict.modal.run |
+| MolmoAct2 AE checkpoint | https://huggingface.co/JaidevShriram/molmoact2-jags-ae |
 
-## Cam1 color-stack verification (optional)
-
-When enabled and wired for experiments, verification segments red / yellow / blue / green in
-`cam1` height bands (no ArUco). Wall/roof checks also look for the support color in the band
-below. Color-only vision cannot prove physical shape identity — only that the requested color
-occupies the expected band.
+Serve URLs are listed under [Inference](#inference).
 
 ## Safety
 
-- Research harness, not a certified safety controller.
-- Use a physical E-stop, guarding, independent motion limits, and low initial speed.
-- Keep people outside the workspace while torque is enabled.
-- Test stop, home, disconnect, joint ordering, and action scaling before policy rollouts.
-- Prefer `dry_run: true` until logged deltas look sane.
-- Use `release_torque.py` / `disarm.py` if a crash leaves the arm energized.
-
-## Testing
-
-```bash
-pytest
-ruff check .
-mypy src/house_builder
-```
-
-Tests cover parser variants and errors, planning, state transitions, builder success/failure
-paths, voice command handling, and human_builder detection helpers.
+Research harness, not a certified safety controller. Physical E-stop, guarding, independent
+motion limits, low initial speed. Keep people clear while torque is enabled. Prefer
+`dry_run: true` until logged deltas look sane. Test stop / home / disconnect / joint order /
+action scaling before rollouts. Use `release_torque.py` / `disarm.py` if a crash leaves the arm
+energized.
 
 ## Credits
 
-The SO-100 driver stack, Modal deployment / fine-tuning scripts, and calibration tooling under
-`third_party/so100-hackathon/` are vendored from the **so100-hackathon** project
-([jaidevshriram/so100-hackathon](https://github.com/jaidevshriram/so100-hackathon),
-[mission-robotics-ai/so100-hackathon](https://github.com/mission-robotics-ai/so100-hackathon) /
-[Rerun.io](https://rerun.io)). That code is used under its original **MIT / Apache-2.0** dual
-license — see `third_party/so100-hackathon/LICENSE-MIT` and `LICENSE-APACHE`. Only source is
-vendored; `recordings/`, `datasets/`, and `.pixi/` are regenerated locally with `pixi install`.
-
-Dataset and many Modal training / serve jobs are by Jaidev Shriram and collaborators on
-[JAGS_v0_testing](https://huggingface.co/datasets/JaidevShriram/JAGS_v0_testing). This
-repository is the SO-101 house-builder harness layered on top of that stack.
+Vendored SO-100 stack under **MIT / Apache-2.0** from so100-hackathon
+([Rerun.io](https://rerun.io) / mission-robotics / Jaidev Shriram) — see
+`third_party/so100-hackathon/LICENSE-*`. Source only is vendored; regenerate `.pixi/`,
+`recordings/`, `datasets/` with `pixi install`. Dataset and Modal jobs: Jaidev Shriram &
+collaborators. This repo is the house-builder layer on top.
