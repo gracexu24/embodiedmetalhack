@@ -13,3 +13,13 @@ backend/scans/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# Vendored so100-hackathon: env/data artifacts that get regenerated locally
+# (source is committed; these are not). The vendored dir also has its own nested
+# .gitignore that git honors, but recordings/ is not covered there.
+third_party/so100-hackathon/.pixi/
+third_party/so100-hackathon/recordings/
+third_party/so100-hackathon/datasets/
+third_party/so100-hackathon/.web-viewer/
+third_party/so100-hackathon/lerobot/
+third_party/so100-hackathon/*.rrd

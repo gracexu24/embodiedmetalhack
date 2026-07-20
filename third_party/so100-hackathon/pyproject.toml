@@ -1,0 +1,191 @@
+[project]
+authors = [{name = "Rerun.io", email = "opensource@rerun.io"}]
+dependencies = []
+license = "MIT OR Apache-2.0"
+name = "so100-hackathon"
+requires-python = ">= 3.11"
+version = "0.1.0"
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/so100_hackathon"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+numpy = "*"
+tyro = "*"
+pyserial = "*"
+py-opencv = "*"
+pandas = "*"
+rich = "*"
+
+[tool.pixi.target.osx-arm64.dependencies]
+# Camera enumeration in OpenCV's exact index order (to skip the built-in webcam).
+pyobjc-framework-avfoundation = "*"
+
+[tool.pixi.pypi-dependencies]
+so100_hackathon = { path = ".", editable = true }
+rerun-sdk = "==0.34.1"
+feetech-servo-sdk = ">=1.0.0"
+datafusion = ">=53,<54"  # rerun-sdk 0.34 requires datafusion major 53
+markdown = ">=3.6"
+# Client SDK only -- submits jobs to Modal's cloud GPUs, doesn't need lerobot/torch
+# locally (those live in the remote container image defined in finetune_modal.py).
+modal = "*"
+# The New Theory inference SDK + `newt` CLI, bundled so one `pixi install` gives
+# hackers the whole toolchain. Tracks main, not a SHA — the SDK is still moving
+# through the event, and a fix needs to reach a kit without a pyproject edit.
+# Determinism lives in the committed pixi.lock, not this line: a fresh clone
+# gets the locked rev; `git pull && pixi update newt` is the fix-delivery path.
+# Core deps only (msgpack/httpx/websockets/pillow/numpy) — the heavy
+# [hardware]/[recording] extras stay out.
+newt = { git = "https://github.com/new-theory-research/newt-python.git", branch = "main" }
+
+# LeRobot pins an older rerun-sdk which conflicts with ours, so the export env is fully
+# isolated (no default feature). export_lerobot.py (default env) queries the catalog and
+# stages episodes to disk, then spawns the writer in this env to produce LeRobot v3.
+[tool.pixi.feature.export.dependencies]
+python = ">=3.11,<3.13"  # torch has no wheels for newer interpreters yet
+ffmpeg = "7.*"  # torchcodec (lerobot's video reader) supports ffmpeg 4-7
+
+[tool.pixi.feature.export.pypi-dependencies]
+lerobot = "==0.4.2"
+
+[tool.pixi.tasks.export-lerobot]
+cmd = "python tools/apps/export_lerobot.py"
+description = "Export a recorded dataset to LeRobot v3 under datasets/ (local; add --push to also upload to the Hugging Face Hub)"
+
+[tool.pixi.tasks.finetune]
+cmd = "python tools/apps/finetune.py"
+description = "One command from a recorded dataset to a fine-tune on New Theory: exports (by name) then launches `newt finetune` (--dry-run to stop after the export)"
+
+[tool.pixi.tasks.finetune-modal-act]
+cmd = "modal run --detach tools/apps/finetune_modal_act.py"
+description = "Fine-tune an ACT policy on a Modal T4 GPU from a Hugging Face LeRobot dataset, push the result to the HF Hub (--detach: survives a local disconnect; --help for options)"
+
+[tool.pixi.tasks.finetune-modal-molmoact2]
+cmd = "modal run --detach tools/apps/finetune_modal_molmoact2.py"
+description = "Fine-tune MolmoAct2 (action-expert-only, from the base checkpoint) on a Modal A10G GPU, push the result to the HF Hub (--detach: survives a local disconnect; --help for options)"
+
+[tool.pixi.tasks.serve-modal-molmoact2]
+cmd = "modal serve tools/apps/policy_server_modal_molmoact2.py"
+description = "Serve a MolmoAct2 checkpoint on a Modal A10G as a /act endpoint for deploy-policy to hit (temporary URL; `modal deploy` instead for a persistent one)"
+
+[tool.pixi.feature.dev.dependencies]
+ruff = "*"
+pytest = ">=8.0.0,<9"
+beartype = ">=0.22.9"
+pyrefly = "*"
+vulture = "*"
+
+[tool.pixi.feature.dev.activation.env]
+PIXI_DEV_MODE = "1"
+
+[tool.pixi.feature.dev.tasks.lint]
+cmd = "ruff check ."
+description = "Lint the package"
+
+# Run first ruff fix, then ruff format, order is important see also https://twitter.com/charliermarsh/status/1717229721954799727
+[tool.pixi.feature.dev.tasks.py-fmt]
+cmd = "ruff check --fix . && ruff format ."
+description = "Format the Python code"
+
+[tool.pixi.feature.dev.tasks.py-fmt-check]
+cmd = "ruff format --check . && ruff check ."
+description = "Check formatting and lints of the Python code"
+
+[tool.pixi.feature.dev.tasks.py-lint]
+cmd = "pyrefly check src tools"
+description = "Typecheck the Python code"
+
+[tool.pixi.feature.dev.tasks.typecheck]
+cmd = "pyrefly check src tools"
+description = "Typecheck the package"
+
+[tool.pixi.feature.dev.tasks.deadcode]
+cmd = "vulture --config pyproject.toml"
+description = "Find dead code in the package"
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+export = { features = ["export"], no-default-feature = true }
+
+[tool.pixi.tasks.so100-server]
+cmd = "python tools/apps/so100_server.py"
+description = "Long-lived local data server: gRPC proxy + catalog (re-registers recordings/ on startup) + control API for recording episodes (--fake for camera-only)"
+env = { RUST_BACKTRACE = "1" }
+
+[tool.pixi.tasks.learn]
+cmd = "python tools/apps/learn_site.py"
+description = "Serve the hackathon course site on http://localhost:3000 (--build DIR for a static export)"
+
+[tool.pixi.tasks.ports]
+cmd = "lsof -nP -iTCP:9876 -iTCP:51234 -iTCP:8000 -iTCP:3000 -sTCP:LISTEN || echo 'all course ports are free (9876 proxy, 51234 catalog, 8000 control API, 3000 course site)'"
+description = "Show which of the course's ports are occupied and by what (9876 proxy, 51234 catalog, 8000 control API, 3000 course site)"
+
+[tool.pixi.tasks.record-episode]
+cmd = "python tools/apps/record_episode.py"
+description = "Record one episode from the CLI to recordings/<dataset>/<episode>.rrd (with task + tag properties) and register it to the local catalog"
+
+[tool.pixi.tasks.query-dataset]
+cmd = "python tools/apps/query_dataset.py"
+description = "Query the local catalog: list datasets, per-episode metadata table (--dataset), tag filter (--tag), entity series to pandas (--entity)"
+
+[tool.pixi.tasks.replay-episode]
+cmd = "python tools/apps/replay_episode.py"
+description = "Replay a recorded episode's action trajectory on the follower arm (--speed 0.5 for half speed)"
+
+[tool.pixi.tasks.deploy-policy]
+cmd = "python tools/apps/deploy_policy.py"
+description = "Run a trained MolmoAct2 policy on the follower arm via an inference server (--dry-run to watch predictions without motion)"
+
+[tool.pixi.tasks.check-cameras]
+cmd = "python tools/apps/check_cameras.py"
+description = "Camera health check: USB vs AVFoundation vs OpenCV layer diff, then stream every working camera into a Rerun viewer for a few seconds"
+
+[tool.pixi.tasks.log-so100]
+cmd = "python tools/apps/log_so100.py"
+description = "Stream live SO-100 arm telemetry into a Rerun viewer"
+
+[tool.pixi.tasks.calibrate-so100]
+cmd = "python tools/apps/calibrate_so100.py"
+description = "Guided SO-100 calibration (match target poses shown in the viewer); also dual-writes the calibration in LeRobot's format for newt-starter/lerobot tools"
+
+[tool.pixi.tasks.export-calibration]
+cmd = "python tools/apps/export_calibration.py"
+description = "Re-export an arm's calibration in LeRobot's format into the HF cache (calibrate-so100 already does this automatically; arm must be plugged in)"
+
+[tool.pixi.tasks.teleop-so100]
+cmd = "python tools/apps/log_so100.py --teleop --fps 60"
+description = "Teleoperate: the follower arm mirrors the leader (torque ON), with full logging"
+
+[tool.vulture]
+paths = ["src/so100_hackathon", "tools"]
+exclude = ["*/.pixi/*", "*/__pycache__/*", "*/build/*", "*/dist/*"]
+sort_by_size = true
+min_confidence = 60
+# Framework-used names vulture can't see through: the tyro config field consumed via
+# RerunTyroConfig.__post_init__, MotorTelemetry fields read dynamically via getattr in
+# log_arms.METRICS, the vendored RerunTyroConfig.rec_stream handle, http.server's
+# handler hooks (dataset_collector), its _rec recording-stream keep-alive, and the
+# export writer's av.logging.restore_default_callback no-op patch (read by lerobot).
+ignore_names = [
+    "rr_config", "rec_stream", "speed_ticks_s", "load_pct", "voltage_v", "temperature_c", "current_ma",
+    "do_GET", "do_POST", "do_OPTIONS", "log_message", "args", "_rec", "restore_default_callback",
+]
+
+[tool.ruff]
+line-length = 150
+extend-exclude = [".pixi"]
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I"]
+ignore = ["E501"]
