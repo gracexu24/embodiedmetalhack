@@ -6,6 +6,9 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Accidental mypy SQLite cache written at repo root (real cache is .mypy_cache/)
+/3.11/
+
 # Backend dashboard runtime artifacts (per-run Rerun recordings and camera-3 scans)
 backend/recordings/
 backend/scans/

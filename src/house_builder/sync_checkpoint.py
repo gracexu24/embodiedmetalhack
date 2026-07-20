@@ -1,14 +1,12 @@
-"""Download a trained MolmoAct2 checkpoint from a Modal Volume to local disk, then
-report the local path to put in house_builder/config.yaml's policy.local_checkpoint.
+"""Download a trained MolmoAct2 checkpoint from a Modal Volume to local disk.
+
+This harness serves policies over Modal HTTP (`policy.server` in config.yaml), so a
+local checkpoint is optional tooling for inspection or alternate deploy paths — not
+wired into the default runtime.
 
 Fill in MODAL_VOLUME_NAME and MODAL_CHECKPOINT_PATH once your Modal training job's
-volume name and output path are settled -- same "placeholder now, fill in later"
-pattern as LEADER_PORT/FOLLOWER_PORT in robot/teleop_config.py. Requires Modal auth
-already set up locally (`modal token set` / MODAL_TOKEN_ID+MODAL_TOKEN_SECRET).
-
-NOT independently testable without real Modal credentials and a real volume, so this
-hasn't been run end-to-end -- verified against the installed `modal` SDK's actual
-method signatures (Volume.from_name, .iterdir, .read_file_into_fileobj), not guessed.
+volume name and output path are settled. Requires Modal auth
+(`modal token set` / MODAL_TOKEN_ID+MODAL_TOKEN_SECRET).
 """
 from __future__ import annotations
 

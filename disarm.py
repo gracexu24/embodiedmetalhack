@@ -6,12 +6,12 @@ port at a time, so if the harness backend is still running (holding the arm), di
 it instead:
 
     curl -X POST -H 'Content-Type: application/json' \\
-        -d '{"command":"stop"}' http://localhost:8001/api/build/command
+        -d '{"command":"stop"}' http://localhost:8000/api/build/command
 
-Run this one from so100-hackathon's pixi env so so100_hackathon imports resolve:
+Run from the vendored so100-hackathon pixi env so so100_hackathon imports resolve:
 
-    cd ~/Desktop/so100-hackathon && \\
-        pixi run python ~/Desktop/GIT-Projects/embodiedmetalhack/disarm.py
+    export REPO=$(pwd)
+    cd third_party/so100-hackathon && pixi run python "$REPO/disarm.py"
 """
 
 from __future__ import annotations

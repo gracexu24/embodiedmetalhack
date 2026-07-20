@@ -11,10 +11,9 @@ robot:
   # replay_episode.py/deploy_policy.py use all session) -- set explicitly only if multiple
   # calibrated followers are ever plugged in at once.
   port: null
-  # Calibrations now live in the vendored copy under third_party/. Absolute path is
-  # safest since run.py's cwd may not be this repo root; adjust the prefix if you
-  # moved the repo. (Relative also works when run from the repo root.)
-  calibration_dir: /Users/jaidev/Desktop/GIT-Projects/embodiedmetalhack/third_party/so100-hackathon/calibrations
+  # Calibrations live in the vendored copy under third_party/. Prefer an absolute
+  # path if run.py's cwd is not this repo root; relative works from the repo root.
+  calibration_dir: third_party/so100-hackathon/calibrations
   # [0,0,0,0,0,0] calibrated = each arm joint at its calibration "middle" pose, gripper
   # closed (0% = closed for LINEAR calib_mode) -- this repo's own calibration convention
   # makes the all-zero pose a real, safe home position already, not a placeholder.
